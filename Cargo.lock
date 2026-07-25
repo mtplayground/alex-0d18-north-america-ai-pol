@@ -1865,6 +1865,8 @@ dependencies = [
  "aws-sdk-s3",
  "chrono",
  "policy-shared",
+ "serde_json",
+ "sqlx",
  "tokio",
 ]
 
