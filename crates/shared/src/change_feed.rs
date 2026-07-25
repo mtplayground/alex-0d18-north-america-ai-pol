@@ -13,6 +13,12 @@ pub struct ChangeFeedQuery {
     pub limit: Option<u32>,
     /// Number of most-recent items to skip.
     pub offset: Option<u32>,
+    /// Jurisdiction code to include, such as `us` or `ca`.
+    pub region: Option<String>,
+    /// Publishing agency to include.
+    pub agency: Option<String>,
+    /// Current policy status to include.
+    pub status: Option<String>,
 }
 
 impl ChangeFeedQuery {
@@ -21,6 +27,19 @@ impl ChangeFeedQuery {
         let limit = self.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
         (limit, self.offset.unwrap_or_default())
     }
+
+    /// Returns optional, normalized values for feed refinement.
+    pub fn filters(&self) -> (Option<String>, Option<String>, Option<String>) {
+        (
+            normalized_filter(self.region.as_deref()).map(str::to_ascii_lowercase),
+            normalized_filter(self.agency.as_deref()).map(str::to_owned),
+            normalized_filter(self.status.as_deref()).map(str::to_owned),
+        )
+    }
+}
+
+fn normalized_filter(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 /// One policy entry in the change feed, represented by its latest version.
@@ -56,9 +75,25 @@ mod tests {
             ChangeFeedQuery {
                 limit: Some(500),
                 offset: Some(7),
+                ..ChangeFeedQuery::default()
             }
             .pagination(),
             (100, 7)
+        );
+    }
+
+    #[test]
+    fn filters_trim_empty_values_and_normalize_region() {
+        let query = ChangeFeedQuery {
+            region: Some(" CA ".to_owned()),
+            agency: Some("  Health Canada  ".to_owned()),
+            status: Some(" ".to_owned()),
+            ..ChangeFeedQuery::default()
+        };
+
+        assert_eq!(
+            query.filters(),
+            (Some("ca".to_owned()), Some("Health Canada".to_owned()), None)
         );
     }
 }

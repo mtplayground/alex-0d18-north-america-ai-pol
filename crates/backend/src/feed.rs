@@ -18,6 +18,7 @@ pub async fn list_changes(
     Query(query): Query<ChangeFeedQuery>,
 ) -> Result<Json<ChangeFeedResponse>, FeedError> {
     let (limit, offset) = query.pagination();
+    let (region, agency, status) = query.filters();
     let rows = sqlx::query_as::<_, FeedRow>(
         "SELECT entries.title, entries.region, entries.agency, entries.publication_date, \
          entries.status, entries.source_url, latest.change_summary, latest.observed_at \
@@ -29,11 +30,17 @@ pub async fn list_changes(
              ORDER BY observed_at DESC, id DESC \
              LIMIT 1 \
          ) AS latest ON TRUE \
+         WHERE ($3::TEXT IS NULL OR entries.region = $3) \
+           AND ($4::TEXT IS NULL OR entries.agency = $4) \
+           AND ($5::TEXT IS NULL OR entries.status = $5) \
          ORDER BY latest.observed_at DESC, latest.id DESC \
          LIMIT $1 OFFSET $2",
     )
     .bind(i64::from(limit) + 1)
     .bind(i64::from(offset))
+    .bind(region)
+    .bind(agency)
+    .bind(status)
     .fetch_all(&database.pool)
     .await
     .map_err(FeedError::Database)?;
