@@ -27,7 +27,8 @@ storage, AI summarizer, and worker scheduler. The backend reads the managed
 PostgreSQL connection string from `DATABASE_URL` and applies the checked-in
 SQLx migrations at startup. Migration files live in `migrations/`; use
 `sqlx migrate add <name>` from the repository root to create the next ordered
-migration.
+migration. The `sources` migration seeds initial United States and Canadian
+government sources with their crawler configuration.
 
 Run the backend:
 

@@ -5,6 +5,8 @@
 
 pub mod config;
 pub mod domain;
+pub mod source;
 
 pub use config::{BackendConfig, ConfigError, WorkerConfig};
 pub use domain::Region;
+pub use source::Source;
