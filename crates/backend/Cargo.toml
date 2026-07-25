@@ -1,0 +1,10 @@
+[package]
+name = "policy-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axum.workspace = true
+policy-shared = { path = "../shared" }
+tokio.workspace = true
