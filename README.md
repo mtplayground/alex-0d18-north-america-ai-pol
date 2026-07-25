@@ -31,6 +31,8 @@ migration. The `sources` migration seeds initial United States and Canadian
 government sources with their crawler configuration. `policy_entries` stores
 the current normalized policy record for each source, including the fields used
 by reverse-chronological feeds and region, agency, and status filters.
+`policy_versions` preserves each observed normalized state and its generated
+change summary.
 
 Run the backend:
 
