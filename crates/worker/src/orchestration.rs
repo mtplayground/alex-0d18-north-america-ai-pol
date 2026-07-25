@@ -45,8 +45,32 @@ impl IngestionOrchestrator {
     /// Fetches the enabled sources and processes them independently.
     pub async fn run_once(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         for source in enabled_sources(&self.database).await? {
-            if let Err(error) = self.process_source(&source).await {
-                eprintln!("source {} failed: {error}", source.id);
+            let run_id = match start_source_run(&self.database, source.id).await {
+                Ok(run_id) => Some(run_id),
+                Err(error) => {
+                    eprintln!("could not record the start of source {}: {error}", source.id);
+                    None
+                }
+            };
+
+            match self.process_source(&source).await {
+                Ok(outcome) => {
+                    if let Some(run_id) = run_id {
+                        if let Err(error) = finish_source_run(&self.database, run_id, &outcome).await
+                        {
+                            eprintln!("could not record success for source {}: {error}", source.id);
+                        }
+                    }
+                }
+                Err(error) => {
+                    eprintln!("source {} failed: {error}", source.id);
+                    if let Some(run_id) = run_id {
+                        if let Err(record_error) = fail_source_run(&self.database, run_id, error.as_ref()).await
+                        {
+                            eprintln!("could not record failure for source {}: {record_error}", source.id);
+                        }
+                    }
+                }
             }
         }
 
@@ -56,14 +80,18 @@ impl IngestionOrchestrator {
     async fn process_source(
         &self,
         source: &Source,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> Result<SourceProcessOutcome, Box<dyn Error + Send + Sync>> {
         let fetched = self.fetch(source).await?;
         let normalized = self.normalize(fetched)?;
 
         let outcome = self.detect_changes(&normalized).await?;
-        self.store(&normalized, outcome);
+        self.store(&normalized, &outcome);
 
-        Ok(())
+        Ok(SourceProcessOutcome {
+            raw_snapshot_key: normalized.raw_snapshot_key,
+            records_processed: normalized.records.len(),
+            change_detection: outcome,
+        })
     }
 
     async fn fetch(
@@ -149,7 +177,7 @@ impl IngestionOrchestrator {
             .await
     }
 
-    fn store(&self, document: &NormalizedDocument, outcome: ChangeDetectionOutcome) {
+    fn store(&self, document: &NormalizedDocument, outcome: &ChangeDetectionOutcome) {
         println!(
             "stored {} new, {} updated, and {} unchanged records from source {} with snapshot {} ({})",
             outcome.new_entries,
@@ -160,6 +188,12 @@ impl IngestionOrchestrator {
             document.content_type
         );
     }
+}
+
+struct SourceProcessOutcome {
+    raw_snapshot_key: String,
+    records_processed: usize,
+    change_detection: ChangeDetectionOutcome,
 }
 
 #[derive(FromRow)]
@@ -194,6 +228,55 @@ async fn enabled_sources(database: &PgPool) -> Result<Vec<Source>, sqlx::Error> 
             enabled: row.enabled,
         })
         .collect())
+}
+
+async fn start_source_run(database: &PgPool, source_id: i64) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO source_ingestion_runs (source_id, status) VALUES ($1, 'running') RETURNING id",
+    )
+    .bind(source_id)
+    .fetch_one(database)
+    .await
+}
+
+async fn finish_source_run(
+    database: &PgPool,
+    run_id: i64,
+    outcome: &SourceProcessOutcome,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE source_ingestion_runs SET status = 'succeeded', raw_snapshot_key = $2, \
+         records_processed = $3, new_entries = $4, updated_entries = $5, unchanged_entries = $6, \
+         completed_at = NOW() WHERE id = $1",
+    )
+    .bind(run_id)
+    .bind(&outcome.raw_snapshot_key)
+    .bind(i32::try_from(outcome.records_processed).unwrap_or(i32::MAX))
+    .bind(i32::try_from(outcome.change_detection.new_entries).unwrap_or(i32::MAX))
+    .bind(i32::try_from(outcome.change_detection.updated_entries).unwrap_or(i32::MAX))
+    .bind(i32::try_from(outcome.change_detection.unchanged_entries).unwrap_or(i32::MAX))
+    .execute(database)
+    .await?;
+
+    Ok(())
+}
+
+async fn fail_source_run(
+    database: &PgPool,
+    run_id: i64,
+    error: &(dyn Error + Send + Sync),
+) -> Result<(), sqlx::Error> {
+    let message = error.to_string();
+    let message = &message[..message.len().min(4_000)];
+    sqlx::query(
+        "UPDATE source_ingestion_runs SET status = 'failed', error_message = $2, completed_at = NOW() WHERE id = $1",
+    )
+    .bind(run_id)
+    .bind(message)
+    .execute(database)
+    .await?;
+
+    Ok(())
 }
 
 struct FetchedDocument {
