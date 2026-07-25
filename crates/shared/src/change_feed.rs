@@ -45,6 +45,8 @@ fn normalized_filter(value: Option<&str>) -> Option<&str> {
 /// One policy entry in the change feed, represented by its latest version.
 #[derive(Clone, Debug, Serialize)]
 pub struct ChangeFeedItem {
+    /// Identifier used to request the expandable entry detail.
+    pub entry_id: i64,
     pub title: String,
     pub region: String,
     pub agency: String,

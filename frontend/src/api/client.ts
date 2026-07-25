@@ -7,6 +7,7 @@ export type ChangeFeedFilters = {
 };
 
 export type ChangeFeedItem = {
+  entry_id: number;
   title: string;
   region: string;
   agency: string;
