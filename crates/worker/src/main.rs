@@ -14,6 +14,7 @@ mod fetcher;
 mod orchestration;
 mod scheduler;
 pub mod storage;
+pub mod summarizer;
 mod us_normalizer;
 
 #[tokio::main]
@@ -24,6 +25,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .connect(&config.database_url)
         .await?;
     let snapshot_storage = storage::SnapshotStorage::from_config(&config.object_storage);
+    let ai_summarizer = summarizer::AiSummarizer::from_config(&config.ai_summarizer)?;
     let fetcher = fetcher::SourceFetcher::new()?;
     let normalizers: Vec<Box<dyn PolicyNormalizer>> = vec![
         Box::new(us_normalizer::UsGovernmentNormalizer),
@@ -34,6 +36,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         fetcher,
         normalizers,
         snapshot_storage,
+        ai_summarizer,
     );
     let scheduler = scheduler::Scheduler::new(config.scheduler_cadence);
 

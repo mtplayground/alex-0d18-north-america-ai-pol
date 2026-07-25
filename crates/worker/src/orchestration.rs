@@ -12,6 +12,7 @@ use crate::{
     change_detection::{ChangeDetectionOutcome, ChangeDetector},
     fetcher::SourceFetcher,
     storage::SnapshotStorage,
+    summarizer::AiSummarizer,
 };
 
 /// Executes one pass over every enabled source.
@@ -21,6 +22,8 @@ pub struct IngestionOrchestrator {
     normalizers: Vec<Box<dyn PolicyNormalizer>>,
     change_detector: ChangeDetector,
     snapshot_storage: SnapshotStorage,
+    // Retained at the pipeline boundary for the change-summary workflow.
+    _ai_summarizer: AiSummarizer,
 }
 
 impl IngestionOrchestrator {
@@ -30,6 +33,7 @@ impl IngestionOrchestrator {
         fetcher: SourceFetcher,
         normalizers: Vec<Box<dyn PolicyNormalizer>>,
         snapshot_storage: SnapshotStorage,
+        ai_summarizer: AiSummarizer,
     ) -> Self {
         Self {
             change_detector: ChangeDetector::new(database.clone()),
@@ -37,6 +41,7 @@ impl IngestionOrchestrator {
             fetcher,
             normalizers,
             snapshot_storage,
+            _ai_summarizer: ai_summarizer,
         }
     }
 
