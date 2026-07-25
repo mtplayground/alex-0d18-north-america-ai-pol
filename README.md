@@ -36,6 +36,8 @@ change summary. Raw source documents are uploaded to the configured
 S3-compatible object storage and referenced by `policy_versions.raw_snapshot_key`.
 The worker loads enabled sources and runs an ingestion pass immediately, then
 repeats it at `SCHEDULER_CADENCE_SECONDS` (daily by default).
+Each pass fetches the first configured source start path with bounded HTTP
+requests and stores its raw response before normalization.
 
 Run the backend:
 

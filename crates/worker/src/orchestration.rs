@@ -3,21 +3,28 @@
 use std::error::Error;
 
 use policy_shared::{Region, Source};
+use sha2::Digest;
 use sqlx::{postgres::PgPool, FromRow};
 
-use crate::storage::SnapshotStorage;
+use crate::{fetcher::SourceFetcher, storage::SnapshotStorage};
 
 /// Executes one pass over every enabled source.
 pub struct IngestionOrchestrator {
     database: PgPool,
+    fetcher: SourceFetcher,
     snapshot_storage: SnapshotStorage,
 }
 
 impl IngestionOrchestrator {
     /// Creates a source ingestion orchestrator.
-    pub fn new(database: PgPool, snapshot_storage: SnapshotStorage) -> Self {
+    pub fn new(
+        database: PgPool,
+        fetcher: SourceFetcher,
+        snapshot_storage: SnapshotStorage,
+    ) -> Self {
         Self {
             database,
+            fetcher,
             snapshot_storage,
         }
     }
@@ -33,22 +40,45 @@ impl IngestionOrchestrator {
         Ok(())
     }
 
-    async fn process_source(&self, source: &Source) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let Some(fetched) = self.fetch(source) else {
-            return Ok(());
-        };
+    async fn process_source(
+        &self,
+        source: &Source,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let fetched = self.fetch(source).await?;
         let normalized = self.normalize(fetched);
 
         if self.detect_change(&normalized) {
-            self.store(normalized).await?;
+            self.store(normalized);
         }
 
         Ok(())
     }
 
-    fn fetch(&self, source: &Source) -> Option<FetchedDocument> {
+    async fn fetch(
+        &self,
+        source: &Source,
+    ) -> Result<FetchedDocument, Box<dyn Error + Send + Sync>> {
         println!("fetching source {} ({})", source.id, source.base_url);
-        None
+        let payload = self.fetcher.fetch(source).await?;
+        let content_hash = format!("{:x}", sha2::Sha256::digest(&payload.body));
+        let snapshot = self
+            .snapshot_storage
+            .store(
+                source.id,
+                &content_hash,
+                &payload.content_type,
+                payload.body.clone(),
+            )
+            .await?;
+
+        println!("captured {} at {}", snapshot.object_key, payload.url);
+        Ok(FetchedDocument {
+            source_id: source.id,
+            content_hash,
+            content_type: payload.content_type,
+            raw_document: payload.body,
+            raw_snapshot_key: snapshot.object_key,
+        })
     }
 
     fn normalize(&self, document: FetchedDocument) -> NormalizedDocument {
@@ -58,27 +88,25 @@ impl IngestionOrchestrator {
             content_hash: document.content_hash,
             content_type: document.content_type,
             raw_document: document.raw_document,
+            raw_snapshot_key: document.raw_snapshot_key,
         }
     }
 
     fn detect_change(&self, document: &NormalizedDocument) -> bool {
-        println!("detecting changes for source {}", document.source_id);
+        println!(
+            "detecting changes for source {} ({} bytes, hash {})",
+            document.source_id,
+            document.raw_document.len(),
+            document.content_hash
+        );
         true
     }
 
-    async fn store(&self, document: NormalizedDocument) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let snapshot = self
-            .snapshot_storage
-            .store(
-                document.source_id,
-                &document.content_hash,
-                &document.content_type,
-                document.raw_document,
-            )
-            .await?;
-        println!("stored snapshot {}", snapshot.object_key);
-
-        Ok(())
+    fn store(&self, document: NormalizedDocument) {
+        println!(
+            "prepared source {} version with snapshot {} ({})",
+            document.source_id, document.raw_snapshot_key, document.content_type
+        );
     }
 }
 
@@ -121,6 +149,7 @@ struct FetchedDocument {
     content_hash: String,
     content_type: String,
     raw_document: Vec<u8>,
+    raw_snapshot_key: String,
 }
 
 struct NormalizedDocument {
@@ -128,4 +157,5 @@ struct NormalizedDocument {
     content_hash: String,
     content_type: String,
     raw_document: Vec<u8>,
+    raw_snapshot_key: String,
 }
