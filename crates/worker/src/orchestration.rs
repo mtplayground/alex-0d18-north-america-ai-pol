@@ -22,8 +22,6 @@ pub struct IngestionOrchestrator {
     normalizers: Vec<Box<dyn PolicyNormalizer>>,
     change_detector: ChangeDetector,
     snapshot_storage: SnapshotStorage,
-    // Retained at the pipeline boundary for the change-summary workflow.
-    _ai_summarizer: AiSummarizer,
 }
 
 impl IngestionOrchestrator {
@@ -36,12 +34,11 @@ impl IngestionOrchestrator {
         ai_summarizer: AiSummarizer,
     ) -> Self {
         Self {
-            change_detector: ChangeDetector::new(database.clone()),
+            change_detector: ChangeDetector::new(database.clone(), ai_summarizer),
             database,
             fetcher,
             normalizers,
             snapshot_storage,
-            _ai_summarizer: ai_summarizer,
         }
     }
 
