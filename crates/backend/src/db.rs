@@ -1,6 +1,6 @@
 //! PostgreSQL connection and migration support.
 
-use std::{env, error::Error, fmt};
+use std::{error::Error, fmt};
 
 use sqlx::{
     migrate::MigrateError,
@@ -16,10 +16,9 @@ pub struct Database {
 }
 
 impl Database {
-    /// Opens the managed PostgreSQL connection described by `DATABASE_URL`.
-    pub async fn connect_from_env() -> Result<Self, DatabaseError> {
-        let database_url = env::var("DATABASE_URL").map_err(|_| DatabaseError::MissingUrl)?;
-        let pool = PgPoolOptions::new().max_connections(5).connect(&database_url).await?;
+    /// Opens the managed PostgreSQL connection described by configuration.
+    pub async fn connect(database_url: &str) -> Result<Self, DatabaseError> {
+        let pool = PgPoolOptions::new().max_connections(5).connect(database_url).await?;
 
         let database = Self { pool };
         MIGRATOR.run(&database.pool).await?;
@@ -31,8 +30,6 @@ impl Database {
 /// Errors that can occur while establishing the application's database layer.
 #[derive(Debug)]
 pub enum DatabaseError {
-    /// The deployment did not provide the managed PostgreSQL connection string.
-    MissingUrl,
     /// SQLx could not connect to PostgreSQL.
     Sqlx(sqlx::Error),
     /// SQLx could not apply an embedded migration.
@@ -42,7 +39,6 @@ pub enum DatabaseError {
 impl fmt::Display for DatabaseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingUrl => formatter.write_str("DATABASE_URL is required"),
             Self::Sqlx(error) => write!(formatter, "database connection failed: {error}"),
             Self::Migration(error) => write!(formatter, "database migration failed: {error}"),
         }

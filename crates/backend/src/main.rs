@@ -4,23 +4,22 @@
 //! in their dedicated issues. This executable establishes the Axum application
 //! boundary and the network convention used by local and hosted deployments.
 
-use std::{error::Error, net::SocketAddr};
+use std::error::Error;
 
 use axum::{routing::get, Router};
+use policy_shared::BackendConfig;
 
 mod db;
 
-const LISTEN_ADDRESS: &str = "0.0.0.0:8080";
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let database = db::Database::connect_from_env().await?;
+    let config = BackendConfig::from_env()?;
+    let database = db::Database::connect(&config.database_url).await?;
     let app = Router::new().route("/", get(root)).with_state(database);
-    let address: SocketAddr = LISTEN_ADDRESS.parse()?;
-    let listener = tokio::net::TcpListener::bind(address).await?;
+    let listener = tokio::net::TcpListener::bind(config.listen_address).await?;
 
     println!("database migrations applied");
-    println!("backend listening on http://{address}");
+    println!("backend listening on http://{}", config.listen_address);
     axum::serve(listener, app).await?;
     Ok(())
 }
