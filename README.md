@@ -15,6 +15,13 @@ Build the Rust workspace from the repository root:
 cargo build
 ```
 
+Format and lint every Rust crate:
+
+```bash
+cargo fmt-check
+cargo lint
+```
+
 Run the backend:
 
 ```bash
@@ -33,6 +40,16 @@ Build or serve the frontend:
 cd frontend
 npm install
 npm run dev
+```
+
+The frontend toolchain includes type-checking, linting, formatting, and a
+production build:
+
+```bash
+npm run typecheck
+npm run lint
+npm run format:check
+npm run build
 ```
 
 Database configuration, migrations, API routes, source ingestion, and
