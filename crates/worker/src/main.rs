@@ -8,6 +8,7 @@ use std::error::Error;
 use policy_shared::WorkerConfig;
 use sqlx::postgres::PgPoolOptions;
 
+mod fetcher;
 mod orchestration;
 mod scheduler;
 pub mod storage;
@@ -20,7 +21,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .connect(&config.database_url)
         .await?;
     let snapshot_storage = storage::SnapshotStorage::from_config(&config.object_storage);
-    let orchestrator = orchestration::IngestionOrchestrator::new(database, snapshot_storage);
+    let fetcher = fetcher::SourceFetcher::new()?;
+    let orchestrator = orchestration::IngestionOrchestrator::new(database, fetcher, snapshot_storage);
     let scheduler = scheduler::Scheduler::new(config.scheduler_cadence);
 
     println!(
