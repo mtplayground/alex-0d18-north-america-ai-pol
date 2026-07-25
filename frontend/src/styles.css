@@ -126,6 +126,58 @@ h2 {
   color: #89919a;
   font-size: 0.72rem;
 }
+.feed-filter-bar {
+  align-items: end;
+  border-top: 1px solid #303438;
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: 8rem minmax(9rem, 1fr) minmax(8rem, 0.8fr) auto;
+  padding: 0.7rem 1.1rem;
+}
+.feed-filter-bar label {
+  display: grid;
+  gap: 0.3rem;
+}
+.feed-filter-bar label > span {
+  color: #8e969f;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.feed-filter-bar input,
+.feed-filter-bar select,
+.feed-filter-bar button {
+  border: 1px solid #40454b;
+  border-radius: 0.28rem;
+  background: #15181a;
+  color: #d4d7dc;
+  font: inherit;
+  font-size: 0.75rem;
+  min-height: 2rem;
+  padding: 0.35rem 0.45rem;
+}
+.feed-filter-bar input::placeholder {
+  color: #747b84;
+}
+.feed-filter-bar input:focus,
+.feed-filter-bar select:focus {
+  border-color: #73859a;
+  outline: 1px solid #73859a;
+}
+.feed-filter-bar button {
+  color: #b7bdc5;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.feed-filter-bar button:hover:not(:disabled) {
+  border-color: #727981;
+  color: #f1f3f5;
+}
+.feed-filter-bar button:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
 .feed-table {
   border-top: 1px solid #303438;
 }
@@ -276,6 +328,12 @@ h2 {
   }
   .feed-row {
     grid-template-columns: minmax(0, 1fr) 4rem 5.5rem;
+  }
+  .feed-filter-bar {
+    grid-template-columns: 1fr 1fr;
+  }
+  .feed-filter-bar button {
+    grid-column: 1 / -1;
   }
   .feed-row > :nth-child(2),
   .feed-row-header > :nth-child(2),

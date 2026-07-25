@@ -1,8 +1,32 @@
+import { useSearchParams } from "react-router-dom";
+
 import { useChangeFeed } from "../api/hooks";
 import { ChangeFeedRow } from "../components/ChangeFeedRow";
+import { FeedFilterBar } from "../components/FeedFilterBar";
 
 export function ChangeFeedPage() {
-  const { data, error, isPending } = useChangeFeed({ limit: 40 });
+  const [searchParams, setSearchParams] = useSearchParams();
+  const region = searchParams.get("region") ?? "";
+  const agency = searchParams.get("agency") ?? "";
+  const status = searchParams.get("status") ?? "";
+  const { data, error, isPending } = useChangeFeed({
+    limit: 40,
+    ...(region && { region }),
+    ...(agency && { agency }),
+    ...(status && { status }),
+  });
+
+  const updateFilter = (name: "region" | "agency" | "status", value: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) {
+      next.set(name, value);
+    } else {
+      next.delete(name);
+    }
+    setSearchParams(next, { replace: true });
+  };
+
+  const clearFilters = () => setSearchParams({}, { replace: true });
 
   return (
     <section className="console-panel" aria-labelledby="feed-title">
@@ -14,6 +38,13 @@ export function ChangeFeedPage() {
         </div>
         <span className="result-count">{data ? `${data.items.length} shown` : "Loading"}</span>
       </div>
+      <FeedFilterBar
+        agency={agency}
+        onChange={updateFilter}
+        onClear={clearFilters}
+        region={region}
+        status={status}
+      />
       {isPending && <p className="empty-state">Loading policy changes…</p>}
       {error && <p className="empty-state is-error">Unable to load the change feed.</p>}
       {data && data.items.length === 0 && <p className="empty-state">No policy changes yet.</p>}
