@@ -8,13 +8,18 @@ use policy_shared::{
 use sha2::Digest;
 use sqlx::{postgres::PgPool, FromRow};
 
-use crate::{fetcher::SourceFetcher, storage::SnapshotStorage};
+use crate::{
+    change_detection::{ChangeDetectionOutcome, ChangeDetector},
+    fetcher::SourceFetcher,
+    storage::SnapshotStorage,
+};
 
 /// Executes one pass over every enabled source.
 pub struct IngestionOrchestrator {
     database: PgPool,
     fetcher: SourceFetcher,
     normalizers: Vec<Box<dyn PolicyNormalizer>>,
+    change_detector: ChangeDetector,
     snapshot_storage: SnapshotStorage,
 }
 
@@ -27,6 +32,7 @@ impl IngestionOrchestrator {
         snapshot_storage: SnapshotStorage,
     ) -> Self {
         Self {
+            change_detector: ChangeDetector::new(database.clone()),
             database,
             fetcher,
             normalizers,
@@ -52,9 +58,8 @@ impl IngestionOrchestrator {
         let fetched = self.fetch(source).await?;
         let normalized = self.normalize(fetched)?;
 
-        if self.detect_change(&normalized) {
-            self.store(normalized);
-        }
+        let outcome = self.detect_changes(&normalized).await?;
+        self.store(&normalized, outcome);
 
         Ok(())
     }
@@ -122,7 +127,10 @@ impl IngestionOrchestrator {
         })
     }
 
-    fn detect_change(&self, document: &NormalizedDocument) -> bool {
+    async fn detect_changes(
+        &self,
+        document: &NormalizedDocument,
+    ) -> Result<ChangeDetectionOutcome, Box<dyn Error + Send + Sync>> {
         println!(
             "detecting changes for source {} ({} records from {} bytes, hash {})",
             document.source_id,
@@ -130,13 +138,21 @@ impl IngestionOrchestrator {
             document.raw_size,
             document.content_hash
         );
-        true
+        self.change_detector
+            .detect_and_persist(
+                document.source_id,
+                &document.records,
+                &document.raw_snapshot_key,
+            )
+            .await
     }
 
-    fn store(&self, document: NormalizedDocument) {
+    fn store(&self, document: &NormalizedDocument, outcome: ChangeDetectionOutcome) {
         println!(
-            "prepared {} records from source {} with snapshot {} ({})",
-            document.records.len(),
+            "stored {} new, {} updated, and {} unchanged records from source {} with snapshot {} ({})",
+            outcome.new_entries,
+            outcome.updated_entries,
+            outcome.unchanged_entries,
             document.source_id,
             document.raw_snapshot_key,
             document.content_type
