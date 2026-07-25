@@ -5,8 +5,10 @@
 
 pub mod config;
 pub mod domain;
+pub mod policy_entry;
 pub mod source;
 
 pub use config::{BackendConfig, ConfigError, WorkerConfig};
 pub use domain::Region;
+pub use policy_entry::PolicyEntry;
 pub use source::Source;

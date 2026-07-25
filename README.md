@@ -28,7 +28,9 @@ PostgreSQL connection string from `DATABASE_URL` and applies the checked-in
 SQLx migrations at startup. Migration files live in `migrations/`; use
 `sqlx migrate add <name>` from the repository root to create the next ordered
 migration. The `sources` migration seeds initial United States and Canadian
-government sources with their crawler configuration.
+government sources with their crawler configuration. `policy_entries` stores
+the current normalized policy record for each source, including the fields used
+by reverse-chronological feeds and region, agency, and status filters.
 
 Run the backend:
 
