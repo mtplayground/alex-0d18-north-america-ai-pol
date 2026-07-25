@@ -12,6 +12,7 @@ mod fetcher;
 mod orchestration;
 mod scheduler;
 pub mod storage;
+mod us_normalizer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -22,7 +23,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .await?;
     let snapshot_storage = storage::SnapshotStorage::from_config(&config.object_storage);
     let fetcher = fetcher::SourceFetcher::new()?;
-    let orchestrator = orchestration::IngestionOrchestrator::new(database, fetcher, snapshot_storage);
+    let normalizer = us_normalizer::UsGovernmentNormalizer;
+    let orchestrator = orchestration::IngestionOrchestrator::new(
+        database,
+        fetcher,
+        normalizer,
+        snapshot_storage,
+    );
     let scheduler = scheduler::Scheduler::new(config.scheduler_cadence);
 
     println!(
