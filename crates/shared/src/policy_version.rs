@@ -33,4 +33,6 @@ pub struct PolicyVersion {
     pub observed_at: DateTime<Utc>,
     /// Generated explanation of how this version differs from its predecessor.
     pub change_summary: Option<String>,
+    /// Object-storage key for the raw source document used to create this version.
+    pub raw_snapshot_key: Option<String>,
 }

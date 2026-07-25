@@ -32,7 +32,8 @@ government sources with their crawler configuration. `policy_entries` stores
 the current normalized policy record for each source, including the fields used
 by reverse-chronological feeds and region, agency, and status filters.
 `policy_versions` preserves each observed normalized state and its generated
-change summary.
+change summary. Raw source documents are uploaded to the configured
+S3-compatible object storage and referenced by `policy_versions.raw_snapshot_key`.
 
 Run the backend:
 
