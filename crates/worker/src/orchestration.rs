@@ -2,16 +2,23 @@
 
 use std::error::Error;
 
-use policy_shared::{Region, Source};
+use policy_shared::{
+    NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, Region, Source, SourceDocument,
+};
 use sha2::Digest;
 use sqlx::{postgres::PgPool, FromRow};
 
-use crate::{fetcher::SourceFetcher, storage::SnapshotStorage};
+use crate::{
+    fetcher::SourceFetcher,
+    storage::SnapshotStorage,
+    us_normalizer::UsGovernmentNormalizer,
+};
 
 /// Executes one pass over every enabled source.
 pub struct IngestionOrchestrator {
     database: PgPool,
     fetcher: SourceFetcher,
+    normalizer: UsGovernmentNormalizer,
     snapshot_storage: SnapshotStorage,
 }
 
@@ -20,11 +27,13 @@ impl IngestionOrchestrator {
     pub fn new(
         database: PgPool,
         fetcher: SourceFetcher,
+        normalizer: UsGovernmentNormalizer,
         snapshot_storage: SnapshotStorage,
     ) -> Self {
         Self {
             database,
             fetcher,
+            normalizer,
             snapshot_storage,
         }
     }
@@ -45,7 +54,7 @@ impl IngestionOrchestrator {
         source: &Source,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let fetched = self.fetch(source).await?;
-        let normalized = self.normalize(fetched);
+        let normalized = self.normalize(fetched)?;
 
         if self.detect_change(&normalized) {
             self.store(normalized);
@@ -74,6 +83,8 @@ impl IngestionOrchestrator {
         println!("captured {} at {}", snapshot.object_key, payload.url);
         Ok(FetchedDocument {
             source_id: source.id,
+            source: source.clone(),
+            source_url: payload.url.to_string(),
             content_hash,
             content_type: payload.content_type,
             raw_document: payload.body,
@@ -81,22 +92,39 @@ impl IngestionOrchestrator {
         })
     }
 
-    fn normalize(&self, document: FetchedDocument) -> NormalizedDocument {
+    fn normalize(&self, document: FetchedDocument) -> Result<NormalizedDocument, NormalizationError> {
         println!("normalizing source {}", document.source_id);
-        NormalizedDocument {
+        let raw_size = document.raw_document.len();
+        let records = if self.normalizer.supports(&document.source) {
+            self.normalizer.normalize(
+                &document.source,
+                SourceDocument {
+                    source_url: &document.source_url,
+                    content_type: &document.content_type,
+                    body: &document.raw_document,
+                },
+            )?
+        } else {
+            println!("no normalizer is configured for source {}", document.source_id);
+            Vec::new()
+        };
+
+        Ok(NormalizedDocument {
             source_id: document.source_id,
             content_hash: document.content_hash,
             content_type: document.content_type,
-            raw_document: document.raw_document,
+            raw_size,
             raw_snapshot_key: document.raw_snapshot_key,
-        }
+            records,
+        })
     }
 
     fn detect_change(&self, document: &NormalizedDocument) -> bool {
         println!(
-            "detecting changes for source {} ({} bytes, hash {})",
+            "detecting changes for source {} ({} records from {} bytes, hash {})",
             document.source_id,
-            document.raw_document.len(),
+            document.records.len(),
+            document.raw_size,
             document.content_hash
         );
         true
@@ -104,8 +132,11 @@ impl IngestionOrchestrator {
 
     fn store(&self, document: NormalizedDocument) {
         println!(
-            "prepared source {} version with snapshot {} ({})",
-            document.source_id, document.raw_snapshot_key, document.content_type
+            "prepared {} records from source {} with snapshot {} ({})",
+            document.records.len(),
+            document.source_id,
+            document.raw_snapshot_key,
+            document.content_type
         );
     }
 }
@@ -146,6 +177,8 @@ async fn enabled_sources(database: &PgPool) -> Result<Vec<Source>, sqlx::Error> 
 
 struct FetchedDocument {
     source_id: i64,
+    source: Source,
+    source_url: String,
     content_hash: String,
     content_type: String,
     raw_document: Vec<u8>,
@@ -156,6 +189,7 @@ struct NormalizedDocument {
     source_id: i64,
     content_hash: String,
     content_type: String,
-    raw_document: Vec<u8>,
+    raw_size: usize,
     raw_snapshot_key: String,
+    records: Vec<NormalizedPolicyRecord>,
 }

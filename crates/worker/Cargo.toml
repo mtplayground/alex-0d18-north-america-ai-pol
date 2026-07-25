@@ -12,6 +12,7 @@ aws-sdk-s3.workspace = true
 chrono.workspace = true
 policy-shared = { path = "../shared" }
 reqwest.workspace = true
+scraper.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 sqlx.workspace = true
