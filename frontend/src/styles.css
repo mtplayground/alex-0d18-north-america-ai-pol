@@ -193,6 +193,14 @@ h2 {
 .feed-row:hover {
   background: #202428;
 }
+.feed-row.is-new-since-last-visit {
+  border-left: 2px solid #5d9e7d;
+  background: #19211e;
+  padding-left: calc(1.1rem - 2px);
+}
+.feed-row.is-new-since-last-visit:hover {
+  background: #1e2924;
+}
 .feed-row-header {
   background: #1d2023;
   color: #848b94;
@@ -214,6 +222,23 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.policy-title-line {
+  align-items: center;
+  display: flex;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.new-marker {
+  border: 1px solid #3f7c60;
+  border-radius: 999px;
+  color: #a6d8ba;
+  flex: none;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.3rem;
+  text-transform: uppercase;
 }
 .policy-cell small,
 .region-cell,
