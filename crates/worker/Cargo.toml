@@ -1,0 +1,9 @@
+[package]
+name = "policy-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+policy-shared = { path = "../shared" }
+tokio.workspace = true
