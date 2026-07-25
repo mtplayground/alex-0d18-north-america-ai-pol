@@ -7,6 +7,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgPool, FromRow};
 
+use crate::summarizer::AiSummarizer;
+
 /// Counts produced by a change-detection pass.
 #[derive(Default)]
 pub struct ChangeDetectionOutcome {
@@ -21,12 +23,16 @@ pub struct ChangeDetectionOutcome {
 /// Compares normalized records against the latest persisted version.
 pub struct ChangeDetector {
     database: PgPool,
+    summarizer: AiSummarizer,
 }
 
 impl ChangeDetector {
     /// Creates a detector backed by the worker's PostgreSQL pool.
-    pub fn new(database: PgPool) -> Self {
-        Self { database }
+    pub fn new(database: PgPool, summarizer: AiSummarizer) -> Self {
+        Self {
+            database,
+            summarizer,
+        }
     }
 
     /// Persists versions only for new or changed normalized records.
@@ -59,7 +65,7 @@ impl ChangeDetector {
         let mut transaction = self.database.begin().await?;
         let entry_id = upsert_entry(&mut transaction, source_id, record).await?;
         let latest = sqlx::query_as::<_, LatestVersion>(
-            "SELECT content_hash, version_number FROM policy_versions \
+            "SELECT canonical_content, content_hash, version_number FROM policy_versions \
              WHERE policy_entry_id = $1 ORDER BY version_number DESC LIMIT 1",
         )
         .bind(entry_id)
@@ -69,6 +75,9 @@ impl ChangeDetector {
         let change_kind = match latest {
             Some(version) if version.content_hash == content_hash => ChangeKind::Unchanged,
             Some(version) => {
+                let summary = self
+                    .summarize_change(record, Some(&version.canonical_content))
+                    .await;
                 update_entry(&mut transaction, entry_id, record).await?;
                 insert_version(
                     &mut transaction,
@@ -78,11 +87,13 @@ impl ChangeDetector {
                     record,
                     &content_hash,
                     raw_snapshot_key,
+                    summary.as_deref(),
                 )
                 .await?;
                 ChangeKind::Updated
             }
             None => {
+                let summary = self.summarize_change(record, None).await;
                 insert_version(
                     &mut transaction,
                     entry_id,
@@ -91,6 +102,7 @@ impl ChangeDetector {
                     record,
                     &content_hash,
                     raw_snapshot_key,
+                    summary.as_deref(),
                 )
                 .await?;
                 ChangeKind::New
@@ -100,10 +112,30 @@ impl ChangeDetector {
         transaction.commit().await?;
         Ok(change_kind)
     }
+
+    async fn summarize_change(
+        &self,
+        record: &NormalizedPolicyRecord,
+        previous_content: Option<&Value>,
+    ) -> Option<String> {
+        let prompt = summary_prompt(record, previous_content);
+
+        match self.summarizer.summarize(&prompt).await {
+            Ok(summary) => condense_summary(&summary),
+            Err(error) => {
+                eprintln!(
+                    "AI summarization failed for source record {}: {error}",
+                    record.source_external_id
+                );
+                None
+            }
+        }
+    }
 }
 
 #[derive(FromRow)]
 struct LatestVersion {
+    canonical_content: Value,
     content_hash: String,
     version_number: i32,
 }
@@ -116,6 +148,29 @@ enum ChangeKind {
 
 fn canonical_hash(content: &Value) -> Result<String, serde_json::Error> {
     Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(content)?)))
+}
+
+fn summary_prompt(record: &NormalizedPolicyRecord, previous_content: Option<&Value>) -> String {
+    let previous = previous_content
+        .map(Value::to_string)
+        .unwrap_or_else(|| "No prior version exists; explain the new policy entry.".to_owned());
+
+    format!(
+        "Write a factual one-to-two-line plain-language summary of the substantive policy change. \
+         Do not use headings, bullets, or speculation.\n\nPolicy title: {}\nPrevious canonical content: {}\n\nCurrent canonical content: {}",
+        record.title, previous, record.canonical_content
+    )
+}
+
+fn condense_summary(summary: &str) -> Option<String> {
+    let lines = summary
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(2)
+        .collect::<Vec<_>>();
+
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 async fn upsert_entry(
@@ -175,11 +230,12 @@ async fn insert_version(
     record: &NormalizedPolicyRecord,
     content_hash: &str,
     raw_snapshot_key: &str,
+    change_summary: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO policy_versions \
-         (policy_entry_id, version_number, change_kind, canonical_content, content_hash, raw_snapshot_key) \
-         VALUES ($1, $2, $3::policy_change_kind, $4, $5, $6)",
+         (policy_entry_id, version_number, change_kind, canonical_content, content_hash, raw_snapshot_key, change_summary) \
+         VALUES ($1, $2, $3::policy_change_kind, $4, $5, $6, $7)",
     )
     .bind(entry_id)
     .bind(version_number)
@@ -187,6 +243,7 @@ async fn insert_version(
     .bind(&record.canonical_content)
     .bind(content_hash)
     .bind(raw_snapshot_key)
+    .bind(change_summary)
     .execute(&mut **transaction)
     .await?;
 
@@ -202,7 +259,7 @@ struct EntryId {
 mod tests {
     use serde_json::json;
 
-    use super::canonical_hash;
+    use super::{canonical_hash, condense_summary, summary_prompt};
 
     #[test]
     fn canonical_hash_is_stable_for_equivalent_content() {
@@ -210,5 +267,29 @@ mod tests {
             canonical_hash(&json!({ "title": "Example", "status": "active" })).unwrap(),
             canonical_hash(&json!({ "status": "active", "title": "Example" })).unwrap(),
         );
+    }
+
+    #[test]
+    fn summaries_are_limited_to_two_nonempty_lines() {
+        assert_eq!(
+            condense_summary("First line\n\nSecond line\nThird line"),
+            Some("First line\nSecond line".to_owned())
+        );
+    }
+
+    #[test]
+    fn new_record_prompt_explains_that_no_prior_version_exists() {
+        let record = policy_shared::NormalizedPolicyRecord {
+            source_external_id: "example".to_owned(),
+            title: "Example policy".to_owned(),
+            region: policy_shared::Region::UnitedStates,
+            agency: "Example agency".to_owned(),
+            publication_date: None,
+            status: "active".to_owned(),
+            source_url: "https://example.test".to_owned(),
+            canonical_content: json!({ "status": "active" }),
+        };
+
+        assert!(summary_prompt(&record, None).contains("No prior version exists"));
     }
 }
