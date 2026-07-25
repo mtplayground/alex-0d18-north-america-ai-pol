@@ -5,9 +5,15 @@
 
 use std::error::Error;
 
+use policy_shared::WorkerConfig;
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    println!("worker workspace initialized");
+    let config = WorkerConfig::from_env()?;
+    println!(
+        "worker configured with a {} second scheduler cadence",
+        config.scheduler_cadence.as_secs()
+    );
     tokio::signal::ctrl_c().await?;
     println!("worker received shutdown signal");
     Ok(())

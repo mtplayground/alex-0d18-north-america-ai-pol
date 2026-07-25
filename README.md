@@ -22,10 +22,12 @@ cargo fmt-check
 cargo lint
 ```
 
-The backend reads the managed PostgreSQL connection string from `DATABASE_URL`
-and applies the checked-in SQLx migrations at startup. Migration files live in
-`migrations/`; use `sqlx migrate add <name>` from the repository root to create
-the next ordered migration.
+Use `.env.example` as the environment contract for the backend, object
+storage, AI summarizer, and worker scheduler. The backend reads the managed
+PostgreSQL connection string from `DATABASE_URL` and applies the checked-in
+SQLx migrations at startup. Migration files live in `migrations/`; use
+`sqlx migrate add <name>` from the repository root to create the next ordered
+migration.
 
 Run the backend:
 
