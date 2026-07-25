@@ -12,6 +12,7 @@ use serde::Serialize;
 use tower_http::services::{ServeDir, ServeFile};
 
 mod db;
+mod detail;
 mod feed;
 
 #[tokio::main]
@@ -25,6 +26,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/api/changes", get(feed::list_changes))
+        .route("/api/entries/{id}", get(detail::get_entry))
         .fallback_service(static_files)
         .with_state(database);
     let listener = tokio::net::TcpListener::bind(config.listen_address).await?;
