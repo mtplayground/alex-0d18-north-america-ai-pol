@@ -35,6 +35,19 @@ Run the backend:
 cargo run -p policy-backend
 ```
 
+## Bare deployment
+
+Build the frontend and release backend from the checked-out repository:
+
+```bash
+./scripts/build.sh
+```
+
+Set the variables described in `.env.example` in the process environment, then
+start the service with `./scripts/run.sh`. The backend serves the frontend from
+`FRONTEND_DIST_DIR` (default: `frontend/dist`) and exposes `GET /health`, which
+responds with `{"status":"ok"}`.
+
 Run the worker in another terminal:
 
 ```bash

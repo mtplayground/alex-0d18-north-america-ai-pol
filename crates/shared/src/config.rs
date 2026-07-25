@@ -15,6 +15,8 @@ pub struct BackendConfig {
     pub database_url: String,
     /// Interface and port used by the HTTP server.
     pub listen_address: SocketAddr,
+    /// Directory containing the frontend's production build output.
+    pub frontend_dist_dir: String,
 }
 
 impl BackendConfig {
@@ -23,6 +25,7 @@ impl BackendConfig {
         Ok(Self {
             database_url: required("DATABASE_URL")?,
             listen_address: optional("LISTEN_ADDRESS", "0.0.0.0:8080")?.parse()?,
+            frontend_dist_dir: optional("FRONTEND_DIST_DIR", "frontend/dist")?,
         })
     }
 }
