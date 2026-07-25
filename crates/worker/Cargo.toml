@@ -11,4 +11,6 @@ workspace = true
 aws-sdk-s3.workspace = true
 chrono.workspace = true
 policy-shared = { path = "../shared" }
+serde_json.workspace = true
+sqlx.workspace = true
 tokio.workspace = true

@@ -34,6 +34,8 @@ by reverse-chronological feeds and region, agency, and status filters.
 `policy_versions` preserves each observed normalized state and its generated
 change summary. Raw source documents are uploaded to the configured
 S3-compatible object storage and referenced by `policy_versions.raw_snapshot_key`.
+The worker loads enabled sources and runs an ingestion pass immediately, then
+repeats it at `SCHEDULER_CADENCE_SECONDS` (daily by default).
 
 Run the backend:
 

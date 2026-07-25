@@ -32,6 +32,8 @@ impl BackendConfig {
 
 /// Configuration used by the scheduled ingestion worker.
 pub struct WorkerConfig {
+    /// PostgreSQL connection string used to load enabled sources.
+    pub database_url: String,
     /// Credentials and location for raw-source object storage.
     pub object_storage: ObjectStorageConfig,
     /// Credentials and request defaults for generated change summaries.
@@ -43,9 +45,10 @@ pub struct WorkerConfig {
 impl WorkerConfig {
     /// Loads worker settings from the process environment.
     pub fn from_env() -> Result<Self, ConfigError> {
-        let cadence_seconds = required("SCHEDULER_CADENCE_SECONDS")?.parse()?;
+        let cadence_seconds = optional("SCHEDULER_CADENCE_SECONDS", "86400")?.parse()?;
 
         Ok(Self {
+            database_url: required("DATABASE_URL")?,
             object_storage: ObjectStorageConfig::from_env()?,
             ai_summarizer: AiSummarizerConfig::from_env()?,
             scheduler_cadence: Duration::from_secs(cadence_seconds),
