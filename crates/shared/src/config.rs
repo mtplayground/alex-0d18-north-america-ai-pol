@@ -86,14 +86,19 @@ pub struct AiSummarizerConfig {
     pub api_key: String,
     pub base_url: String,
     pub model: String,
+    /// Maximum time allowed for one AI service request.
+    pub request_timeout: Duration,
 }
 
 impl AiSummarizerConfig {
     fn from_env() -> Result<Self, ConfigError> {
+        let timeout_seconds = optional("AI_SUMMARIZER_TIMEOUT_SECONDS", "20")?.parse()?;
+
         Ok(Self {
             api_key: required("AI_SUMMARIZER_API_KEY")?,
             base_url: required("AI_SUMMARIZER_BASE_URL")?,
             model: required("AI_SUMMARIZER_MODEL")?,
+            request_timeout: Duration::from_secs(timeout_seconds),
         })
     }
 }
@@ -103,7 +108,7 @@ impl AiSummarizerConfig {
 pub enum ConfigError {
     Missing(&'static str),
     InvalidBoolean(std::str::ParseBoolError),
-    InvalidCadence(ParseIntError),
+    InvalidSeconds(ParseIntError),
     InvalidListenAddress(AddrParseError),
 }
 
@@ -112,7 +117,7 @@ impl fmt::Display for ConfigError {
         match self {
             Self::Missing(variable) => write!(formatter, "{variable} is required"),
             Self::InvalidBoolean(error) => write!(formatter, "invalid storage path-style flag: {error}"),
-            Self::InvalidCadence(error) => write!(formatter, "invalid scheduler cadence: {error}"),
+            Self::InvalidSeconds(error) => write!(formatter, "invalid duration in seconds: {error}"),
             Self::InvalidListenAddress(error) => write!(formatter, "invalid listen address: {error}"),
         }
     }
@@ -128,7 +133,7 @@ impl From<std::str::ParseBoolError> for ConfigError {
 
 impl From<ParseIntError> for ConfigError {
     fn from(error: ParseIntError) -> Self {
-        Self::InvalidCadence(error)
+        Self::InvalidSeconds(error)
     }
 }
 
