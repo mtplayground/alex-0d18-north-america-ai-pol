@@ -8,17 +8,13 @@ use policy_shared::{
 use sha2::Digest;
 use sqlx::{postgres::PgPool, FromRow};
 
-use crate::{
-    fetcher::SourceFetcher,
-    storage::SnapshotStorage,
-    us_normalizer::UsGovernmentNormalizer,
-};
+use crate::{fetcher::SourceFetcher, storage::SnapshotStorage};
 
 /// Executes one pass over every enabled source.
 pub struct IngestionOrchestrator {
     database: PgPool,
     fetcher: SourceFetcher,
-    normalizer: UsGovernmentNormalizer,
+    normalizers: Vec<Box<dyn PolicyNormalizer>>,
     snapshot_storage: SnapshotStorage,
 }
 
@@ -27,13 +23,13 @@ impl IngestionOrchestrator {
     pub fn new(
         database: PgPool,
         fetcher: SourceFetcher,
-        normalizer: UsGovernmentNormalizer,
+        normalizers: Vec<Box<dyn PolicyNormalizer>>,
         snapshot_storage: SnapshotStorage,
     ) -> Self {
         Self {
             database,
             fetcher,
-            normalizer,
+            normalizers,
             snapshot_storage,
         }
     }
@@ -92,11 +88,18 @@ impl IngestionOrchestrator {
         })
     }
 
-    fn normalize(&self, document: FetchedDocument) -> Result<NormalizedDocument, NormalizationError> {
+    fn normalize(
+        &self,
+        document: FetchedDocument,
+    ) -> Result<NormalizedDocument, NormalizationError> {
         println!("normalizing source {}", document.source_id);
         let raw_size = document.raw_document.len();
-        let records = if self.normalizer.supports(&document.source) {
-            self.normalizer.normalize(
+        let records = if let Some(normalizer) = self
+            .normalizers
+            .iter()
+            .find(|normalizer| normalizer.supports(&document.source))
+        {
+            normalizer.normalize(
                 &document.source,
                 SourceDocument {
                     source_url: &document.source_url,
