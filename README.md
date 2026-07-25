@@ -38,7 +38,8 @@ The worker loads enabled sources and runs an ingestion pass immediately, then
 repeats it at `SCHEDULER_CADENCE_SECONDS` (daily by default).
 Each pass fetches the first configured source start path with bounded HTTP
 requests and stores its raw response before normalization. U.S. JSON feeds and
-HTML publications are normalized through the shared policy-normalizer interface.
+HTML publications, plus Canadian JSON and HTML sources, are normalized through
+the shared policy-normalizer interface.
 
 Run the backend:
 

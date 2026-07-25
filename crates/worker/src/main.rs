@@ -5,9 +5,10 @@
 
 use std::error::Error;
 
-use policy_shared::WorkerConfig;
+use policy_shared::{PolicyNormalizer, WorkerConfig};
 use sqlx::postgres::PgPoolOptions;
 
+mod canada_normalizer;
 mod fetcher;
 mod orchestration;
 mod scheduler;
@@ -23,11 +24,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .await?;
     let snapshot_storage = storage::SnapshotStorage::from_config(&config.object_storage);
     let fetcher = fetcher::SourceFetcher::new()?;
-    let normalizer = us_normalizer::UsGovernmentNormalizer;
+    let normalizers: Vec<Box<dyn PolicyNormalizer>> = vec![
+        Box::new(us_normalizer::UsGovernmentNormalizer),
+        Box::new(canada_normalizer::CanadaGovernmentNormalizer),
+    ];
     let orchestrator = orchestration::IngestionOrchestrator::new(
         database,
         fetcher,
-        normalizer,
+        normalizers,
         snapshot_storage,
     );
     let scheduler = scheduler::Scheduler::new(config.scheduler_cadence);
