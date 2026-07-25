@@ -6,16 +6,10 @@
 use std::error::Error;
 
 use policy_shared::{PolicyNormalizer, WorkerConfig};
+use policy_worker::{
+    canada_normalizer, fetcher, orchestration, scheduler, storage, summarizer, us_normalizer,
+};
 use sqlx::postgres::PgPoolOptions;
-
-mod change_detection;
-mod canada_normalizer;
-mod fetcher;
-mod orchestration;
-mod scheduler;
-pub mod storage;
-pub mod summarizer;
-mod us_normalizer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {

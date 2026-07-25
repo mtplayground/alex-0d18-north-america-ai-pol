@@ -90,6 +90,7 @@ impl FeedRow {
 }
 
 /// Failure while loading the change feed.
+#[derive(Debug)]
 pub enum FeedError {
     Database(sqlx::Error),
 }
