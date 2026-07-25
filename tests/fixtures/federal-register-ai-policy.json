@@ -1,0 +1,12 @@
+{
+  "results": [
+    {
+      "document_number": "e2e-2026-0001",
+      "title": "Fixture AI Policy Update",
+      "agency_names": ["Fixture Policy Agency"],
+      "publication_date": "2026-07-25",
+      "status": "active",
+      "html_url": "https://example.test/policies/e2e-2026-0001"
+    }
+  ]
+}
