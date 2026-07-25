@@ -40,6 +40,8 @@ Each pass fetches the first configured source start path with bounded HTTP
 requests and stores its raw response before normalization. U.S. JSON feeds and
 HTML publications, plus Canadian JSON and HTML sources, are normalized through
 the shared policy-normalizer interface.
+Canonical normalized content is hashed against the latest version; only new or
+changed records create a policy version linked to their raw snapshot.
 
 Run the backend:
 

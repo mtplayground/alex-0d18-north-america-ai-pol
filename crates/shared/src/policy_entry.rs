@@ -12,6 +12,8 @@ pub struct PolicyEntry {
     pub id: i64,
     /// The tracked government source that published this entry.
     pub source_id: i64,
+    /// Stable identifier supplied by the publishing source.
+    pub source_external_id: String,
     /// Human-readable policy title.
     pub title: String,
     /// Geographic jurisdiction for the policy.

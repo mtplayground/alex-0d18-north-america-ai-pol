@@ -8,6 +8,7 @@ use std::error::Error;
 use policy_shared::{PolicyNormalizer, WorkerConfig};
 use sqlx::postgres::PgPoolOptions;
 
+mod change_detection;
 mod canada_normalizer;
 mod fetcher;
 mod orchestration;
