@@ -55,7 +55,7 @@ export function ChangeFeedPage() {
             <span role="columnheader">Region</span>
             <span role="columnheader">Status</span>
             <span role="columnheader">Date</span>
-            <span role="columnheader">Source</span>
+            <span role="columnheader">Actions</span>
           </div>
           {data.items.map((item) => (
             <ChangeFeedRow item={item} key={`${item.source_url}-${item.changed_at}`} />
