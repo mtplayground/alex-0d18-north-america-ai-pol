@@ -10,4 +10,5 @@ workspace = true
 [dependencies]
 axum.workspace = true
 policy-shared = { path = "../shared" }
+sqlx.workspace = true
 tokio.workspace = true
