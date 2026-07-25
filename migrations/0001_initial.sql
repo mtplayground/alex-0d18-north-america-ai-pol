@@ -1,0 +1,2 @@
+-- This intentionally empty migration establishes the SQLx migration workflow.
+-- Application tables are introduced by their dedicated feature migrations.
