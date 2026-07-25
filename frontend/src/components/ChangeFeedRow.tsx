@@ -9,9 +9,10 @@ import { StatusTag } from "./StatusTag";
 
 type ChangeFeedRowProps = {
   item: ChangeFeedItem;
+  isNewSinceLastVisit: boolean;
 };
 
-export function ChangeFeedRow({ item }: ChangeFeedRowProps) {
+export function ChangeFeedRow({ isNewSinceLastVisit, item }: ChangeFeedRowProps) {
   const [expanded, setExpanded] = useState(false);
   const detail = useEntryDetail(expanded ? String(item.entry_id) : undefined);
   const displayDate = item.publication_date ?? item.changed_at;
@@ -19,9 +20,15 @@ export function ChangeFeedRow({ item }: ChangeFeedRowProps) {
 
   return (
     <>
-      <div className="feed-row" role="row">
+      <div
+        className={`feed-row${isNewSinceLastVisit ? " is-new-since-last-visit" : ""}`}
+        role="row"
+      >
         <span className="policy-cell" role="cell">
-          <strong>{item.title}</strong>
+          <span className="policy-title-line">
+            <strong>{item.title}</strong>
+            {isNewSinceLastVisit && <span className="new-marker">New</span>}
+          </span>
           <small>{item.agency}</small>
           <em>{item.change_summary ?? "No change summary was available for this observation."}</em>
         </span>

@@ -3,12 +3,14 @@ import { useSearchParams } from "react-router-dom";
 import { useChangeFeed } from "../api/hooks";
 import { ChangeFeedRow } from "../components/ChangeFeedRow";
 import { FeedFilterBar } from "../components/FeedFilterBar";
+import { changedSince, useLastVisit } from "../lastVisit";
 
 export function ChangeFeedPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const region = searchParams.get("region") ?? "";
   const agency = searchParams.get("agency") ?? "";
   const status = searchParams.get("status") ?? "";
+  const lastVisit = useLastVisit();
   const { data, error, isPending } = useChangeFeed({
     limit: 40,
     ...(region && { region }),
@@ -27,6 +29,8 @@ export function ChangeFeedPage() {
   };
 
   const clearFilters = () => setSearchParams({}, { replace: true });
+  const newlyChangedCount =
+    data?.items.filter((item) => changedSince(item.changed_at, lastVisit)).length ?? 0;
 
   return (
     <section className="console-panel" aria-labelledby="feed-title">
@@ -36,7 +40,11 @@ export function ChangeFeedPage() {
           <h2 id="feed-title">Latest changes</h2>
           <p>Newest observed policy updates across tracked sources.</p>
         </div>
-        <span className="result-count">{data ? `${data.items.length} shown` : "Loading"}</span>
+        <span className="result-count">
+          {data
+            ? `${data.items.length} shown${newlyChangedCount ? ` · ${newlyChangedCount} new` : ""}`
+            : "Loading"}
+        </span>
       </div>
       <FeedFilterBar
         agency={agency}
@@ -58,7 +66,11 @@ export function ChangeFeedPage() {
             <span role="columnheader">Actions</span>
           </div>
           {data.items.map((item) => (
-            <ChangeFeedRow item={item} key={`${item.source_url}-${item.changed_at}`} />
+            <ChangeFeedRow
+              isNewSinceLastVisit={changedSince(item.changed_at, lastVisit)}
+              item={item}
+              key={`${item.source_url}-${item.changed_at}`}
+            />
           ))}
         </div>
       )}
