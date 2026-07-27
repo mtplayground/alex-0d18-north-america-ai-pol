@@ -37,7 +37,7 @@ while a service manager or deployment platform may provide the same variables di
 | `AI_SUMMARIZER_BASE_URL` | worker | Summarizer API base URL. |
 | `AI_SUMMARIZER_MODEL` | worker | Summarizer model identifier. |
 | `AI_SUMMARIZER_TIMEOUT_SECONDS` | worker | Per-summary timeout; defaults to 20 seconds. |
-| `SCHEDULER_CADENCE_SECONDS` | worker | Delay between runs; defaults to `86400` for daily ingestion. |
+| `SCHEDULER_CADENCE_SECONDS` | worker | Delay between runs; defaults to `3600` for hourly ingestion. |
 
 The worker makes one ingestion pass immediately when it starts, then waits for the configured
 cadence. Keep exactly one worker instance active unless duplicate ingestion is intentionally

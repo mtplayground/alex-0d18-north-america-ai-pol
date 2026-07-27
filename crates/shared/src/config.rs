@@ -46,7 +46,7 @@ pub struct WorkerConfig {
 impl WorkerConfig {
     /// Loads worker settings from the process environment.
     pub fn from_env() -> Result<Self, ConfigError> {
-        let cadence_seconds = optional("SCHEDULER_CADENCE_SECONDS", "86400")?.parse()?;
+        let cadence_seconds = optional("SCHEDULER_CADENCE_SECONDS", "3600")?.parse()?;
 
         Ok(Self {
             database_url: required("DATABASE_URL")?,
