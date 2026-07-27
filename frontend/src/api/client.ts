@@ -10,6 +10,7 @@ export type ChangeFeedItem = {
   entry_id: number;
   title: string;
   region: string;
+  source_category: "policy" | "news";
   agency: string;
   publication_date: string | null;
   status: string;
@@ -41,6 +42,7 @@ export type EntryDetail = {
   source_external_id: string;
   title: string;
   region: string;
+  source_category: "policy" | "news";
   agency: string;
   publication_date: string | null;
   status: string;

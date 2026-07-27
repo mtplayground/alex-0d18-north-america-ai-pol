@@ -20,9 +20,10 @@ pub async fn list_changes(
     let (limit, offset) = query.pagination();
     let (region, agency, status) = query.filters();
     let rows = sqlx::query_as::<_, FeedRow>(
-        "SELECT entries.id AS entry_id, entries.title, entries.region, entries.agency, entries.publication_date, \
+        "SELECT entries.id AS entry_id, entries.title, entries.region, sources.category AS source_category, entries.agency, entries.publication_date, \
          entries.status, entries.source_url, latest.change_summary, latest.observed_at \
          FROM policy_entries AS entries \
+         JOIN sources ON sources.id = entries.source_id \
          JOIN LATERAL ( \
              SELECT id, change_summary, observed_at \
              FROM policy_versions \
@@ -65,6 +66,7 @@ struct FeedRow {
     entry_id: i64,
     title: String,
     region: String,
+    source_category: String,
     agency: String,
     publication_date: Option<NaiveDate>,
     status: String,
@@ -79,6 +81,7 @@ impl FeedRow {
             entry_id: self.entry_id,
             title: self.title,
             region: self.region,
+            source_category: self.source_category,
             agency: self.agency,
             publication_date: self.publication_date,
             status: self.status,

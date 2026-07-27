@@ -3,7 +3,7 @@
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
-use crate::Region;
+use crate::{Region, SourceCategory};
 
 /// A policy record discovered from a tracked government source.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -12,6 +12,8 @@ pub struct PolicyEntry {
     pub id: i64,
     /// The tracked government source that published this entry.
     pub source_id: i64,
+    /// Category inherited from the source that published this entry.
+    pub source_category: SourceCategory,
     /// Stable identifier supplied by the publishing source.
     pub source_external_id: String,
     /// Human-readable policy title.

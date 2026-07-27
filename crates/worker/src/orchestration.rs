@@ -3,7 +3,8 @@
 use std::error::Error;
 
 use policy_shared::{
-    NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, Region, Source, SourceDocument,
+    NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, Region, Source, SourceCategory,
+    SourceDocument,
 };
 use sha2::Digest;
 use sqlx::{postgres::PgPool, FromRow};
@@ -200,6 +201,7 @@ struct SourceProcessOutcome {
 struct SourceRow {
     id: i64,
     region: String,
+    category: String,
     agency: String,
     base_url: String,
     crawl_config: serde_json::Value,
@@ -208,26 +210,32 @@ struct SourceRow {
 
 async fn enabled_sources(database: &PgPool) -> Result<Vec<Source>, sqlx::Error> {
     let rows = sqlx::query_as::<_, SourceRow>(
-        "SELECT id, region, agency, base_url, crawl_config, enabled FROM sources WHERE enabled ORDER BY id",
+        "SELECT id, region, category, agency, base_url, crawl_config, enabled \
+         FROM sources WHERE enabled ORDER BY id",
     )
     .fetch_all(database)
     .await?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| Source {
-            id: row.id,
-            region: if row.region == "us" {
-                Region::UnitedStates
-            } else {
-                Region::Canada
-            },
-            agency: row.agency,
-            base_url: row.base_url,
-            crawl_config: row.crawl_config,
-            enabled: row.enabled,
+    rows.into_iter()
+        .map(|row| {
+            let region = Region::from_code(&row.region).ok_or_else(|| {
+                sqlx::Error::Protocol(format!("unknown source region: {}", row.region))
+            })?;
+            let category = SourceCategory::from_code(&row.category).ok_or_else(|| {
+                sqlx::Error::Protocol(format!("unknown source category: {}", row.category))
+            })?;
+
+            Ok(Source {
+                id: row.id,
+                region,
+                category,
+                agency: row.agency,
+                base_url: row.base_url,
+                crawl_config: row.crawl_config,
+                enabled: row.enabled,
+            })
         })
-        .collect())
+        .collect()
 }
 
 async fn start_source_run(database: &PgPool, source_id: i64) -> Result<i64, sqlx::Error> {

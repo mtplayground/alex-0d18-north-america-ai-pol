@@ -155,6 +155,7 @@ mod tests {
         let source = Source {
             id: 1,
             region: Region::UnitedStates,
+            category: policy_shared::SourceCategory::Policy,
             agency: "Example agency".to_owned(),
             base_url: "https://example.gov".to_owned(),
             crawl_config: json!({ "start_paths": ["/policy/feed"] }),

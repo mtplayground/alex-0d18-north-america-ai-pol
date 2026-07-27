@@ -2,7 +2,8 @@
 
 use chrono::NaiveDate;
 use policy_shared::{
-    NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, Region, Source, SourceDocument,
+    NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, Region, Source, SourceCategory,
+    SourceDocument,
 };
 use scraper::{Html, Selector};
 use serde_json::{json, Value};
@@ -12,7 +13,7 @@ pub struct UsGovernmentNormalizer;
 
 impl PolicyNormalizer for UsGovernmentNormalizer {
     fn supports(&self, source: &Source) -> bool {
-        source.region == Region::UnitedStates
+        source.category == SourceCategory::Policy && source.region == Region::UnitedStates
     }
 
     fn normalize(
@@ -144,6 +145,7 @@ mod tests {
         let source = Source {
             id: 1,
             region: Region::UnitedStates,
+            category: policy_shared::SourceCategory::Policy,
             agency: "Office of the Federal Register".to_owned(),
             base_url: "https://www.federalregister.gov".to_owned(),
             crawl_config: json!({}),
