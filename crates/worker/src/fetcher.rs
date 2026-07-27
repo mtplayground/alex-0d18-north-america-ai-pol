@@ -4,6 +4,7 @@ use std::{
     collections::{HashSet, VecDeque},
     error::Error,
     io,
+    sync::Arc,
     time::Duration,
 };
 
@@ -18,9 +19,16 @@ use reqwest::{
     Client, StatusCode, Url,
 };
 use scraper::{Html, Selector};
+use tokio::{
+    sync::{Mutex, OwnedSemaphorePermit, Semaphore},
+    time::Instant,
+};
 
 const MAX_FETCH_ATTEMPTS: u8 = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(250);
+const CRAWLER_USER_AGENT: &str = "policy-source-crawler/1.0";
+const HOST_REQUEST_DELAY: Duration = Duration::from_millis(250);
+const HOST_MAX_CONCURRENT_REQUESTS: usize = 2;
 const DOCUMENT_ACCEPT_HEADER: &str = "text/html, application/xhtml+xml, application/json, \
     application/feed+json, application/rss+xml, application/atom+xml, application/xml, text/xml";
 
@@ -37,13 +45,20 @@ pub struct FetchedPayload {
 /// HTTP client with bounded requests for source ingestion.
 pub struct SourceFetcher {
     client: Client,
+    robots_cache: RobotsCache,
+    host_limiter: HostRateLimiter,
 }
 
 impl SourceFetcher {
     /// Creates a client with a timeout appropriate for scheduled ingestion.
     pub fn new() -> Result<Self, reqwest::Error> {
         Ok(Self {
-            client: Client::builder().timeout(Duration::from_secs(30)).build()?,
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .user_agent(CRAWLER_USER_AGENT)
+                .build()?,
+            robots_cache: RobotsCache::default(),
+            host_limiter: HostRateLimiter::new(HOST_REQUEST_DELAY, HOST_MAX_CONCURRENT_REQUESTS),
         })
     }
 
@@ -77,7 +92,20 @@ impl SourceFetcher {
                 continue;
             }
 
-            let payload = self.fetch_url(candidate.url).await?;
+            if candidate.discovered
+                && !self
+                    .robots_cache
+                    .allows(&self.client, &self.host_limiter, &candidate.url)
+                    .await
+            {
+                eprintln!(
+                    "skipping discovered URL {} because robots.txt disallows it for {CRAWLER_USER_AGENT}",
+                    candidate.url
+                );
+                continue;
+            }
+
+            let payload = self.fetch_url(candidate.url, candidate.discovered).await?;
             if plan.discovery_enabled() && candidate.depth < plan.max_depth {
                 for url in plan.discovered_urls(&payload)? {
                     let key = url_key(&url);
@@ -85,6 +113,7 @@ impl SourceFetcher {
                         queue.push_back(CrawlCandidate {
                             url,
                             depth: candidate.depth.saturating_add(1),
+                            discovered: true,
                         });
                     }
                 }
@@ -95,7 +124,16 @@ impl SourceFetcher {
         Ok(payloads)
     }
 
-    async fn fetch_url(&self, url: Url) -> Result<FetchedPayload, Box<dyn Error + Send + Sync>> {
+    async fn fetch_url(
+        &self,
+        url: Url,
+        rate_limit: bool,
+    ) -> Result<FetchedPayload, Box<dyn Error + Send + Sync>> {
+        let _host_permit = if rate_limit {
+            Some(self.host_limiter.acquire(&url).await?)
+        } else {
+            None
+        };
         for attempt in 1..=MAX_FETCH_ATTEMPTS {
             match self.fetch_once(url.clone()).await {
                 Ok(payload) => return Ok(payload),
@@ -175,10 +213,269 @@ impl std::fmt::Display for FetchError {
 
 impl Error for FetchError {}
 
+#[derive(Clone, Default)]
+struct RobotsCache {
+    policies: Arc<Mutex<std::collections::HashMap<String, RobotsPolicy>>>,
+}
+
+impl RobotsCache {
+    async fn allows(&self, client: &Client, limiter: &HostRateLimiter, url: &Url) -> bool {
+        let host = host_key(url);
+        if let Some(policy) = self.policies.lock().await.get(&host).cloned() {
+            return policy.allows(url);
+        }
+
+        let policy = fetch_robots_policy(client, limiter, url).await;
+        let allows = policy.allows(url);
+        self.policies.lock().await.insert(host, policy);
+        allows
+    }
+}
+
+#[derive(Clone)]
+enum RobotsPolicy {
+    Rules(Vec<RobotsRule>),
+    AllowAll,
+    DenyAll,
+}
+
+impl RobotsPolicy {
+    fn allows(&self, url: &Url) -> bool {
+        match self {
+            Self::Rules(rules) => robots_allows(rules, url),
+            Self::AllowAll => true,
+            Self::DenyAll => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RobotsRule {
+    pattern: String,
+    allow: bool,
+}
+
+async fn fetch_robots_policy(
+    client: &Client,
+    limiter: &HostRateLimiter,
+    source_url: &Url,
+) -> RobotsPolicy {
+    let mut robots_url = source_url.clone();
+    robots_url.set_path("/robots.txt");
+    robots_url.set_query(None);
+    robots_url.set_fragment(None);
+
+    let permit = match limiter.acquire(&robots_url).await {
+        Ok(permit) => permit,
+        Err(error) => {
+            eprintln!("cannot pace robots.txt request for {robots_url}: {error}");
+            return RobotsPolicy::DenyAll;
+        }
+    };
+    let response = client.get(robots_url.clone()).send().await;
+    drop(permit);
+
+    match response {
+        Ok(response) if response.status().is_success() => match response.text().await {
+            Ok(body) => RobotsPolicy::Rules(parse_robots_rules(&body, CRAWLER_USER_AGENT)),
+            Err(error) => {
+                eprintln!("cannot read robots.txt at {robots_url}: {error}; skipping discovered URLs");
+                RobotsPolicy::DenyAll
+            }
+        },
+        Ok(response) if matches!(response.status(), StatusCode::NOT_FOUND | StatusCode::GONE) => {
+            RobotsPolicy::AllowAll
+        }
+        Ok(response) => {
+            eprintln!(
+                "robots.txt at {robots_url} returned {}; skipping discovered URLs",
+                response.status()
+            );
+            RobotsPolicy::DenyAll
+        }
+        Err(error) => {
+            eprintln!("cannot fetch robots.txt at {robots_url}: {error}; skipping discovered URLs");
+            RobotsPolicy::DenyAll
+        }
+    }
+}
+
+fn parse_robots_rules(body: &str, user_agent: &str) -> Vec<RobotsRule> {
+    let mut groups = Vec::new();
+    let mut agents = Vec::new();
+    let mut rules = Vec::new();
+
+    for line in body.lines() {
+        let line = line.split_once('#').map_or(line, |(value, _)| value).trim();
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        let name = name.trim().to_ascii_lowercase();
+        let value = value.trim();
+
+        if name == "user-agent" {
+            if !rules.is_empty() {
+                groups.push((agents, rules));
+                agents = Vec::new();
+                rules = Vec::new();
+            }
+            if !value.is_empty() {
+                agents.push(value.to_ascii_lowercase());
+            }
+        } else if matches!(name.as_str(), "allow" | "disallow") && !agents.is_empty() && !value.is_empty() {
+            rules.push(RobotsRule {
+                pattern: value.to_owned(),
+                allow: name == "allow",
+            });
+        }
+    }
+    if !agents.is_empty() {
+        groups.push((agents, rules));
+    }
+
+    let user_agent = user_agent.to_ascii_lowercase();
+    let best_match = groups
+        .iter()
+        .flat_map(|(agents, _)| agents)
+        .filter_map(|agent| robots_agent_match(agent, &user_agent))
+        .max()
+        .unwrap_or(0);
+
+    groups
+        .into_iter()
+        .filter(|(agents, _)| {
+            agents
+                .iter()
+                .any(|agent| robots_agent_match(agent, &user_agent) == Some(best_match))
+        })
+        .flat_map(|(_, rules)| rules)
+        .collect()
+}
+
+fn robots_agent_match(agent: &str, user_agent: &str) -> Option<usize> {
+    if agent == "*" {
+        Some(0)
+    } else if user_agent.starts_with(agent) {
+        Some(agent.len())
+    } else {
+        None
+    }
+}
+
+fn robots_allows(rules: &[RobotsRule], url: &Url) -> bool {
+    let path = match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_owned(),
+    };
+    let mut best_rule: Option<(&RobotsRule, usize)> = None;
+
+    for rule in rules {
+        let Some(specificity) = robots_rule_matches(&rule.pattern, &path) else {
+            continue;
+        };
+        if best_rule.is_none_or(|(current, current_specificity)| {
+            specificity > current_specificity
+                || (specificity == current_specificity && rule.allow && !current.allow)
+        }) {
+            best_rule = Some((rule, specificity));
+        }
+    }
+
+    best_rule.is_none_or(|(rule, _)| rule.allow)
+}
+
+fn robots_rule_matches(pattern: &str, path: &str) -> Option<usize> {
+    let pattern = pattern.trim();
+    let anchored = pattern.ends_with('$');
+    let pattern = pattern.trim_end_matches('$');
+    let expression = format!(
+        "^{}{}",
+        regex::escape(pattern).replace(r"\*", ".*"),
+        if anchored { "$" } else { ".*" }
+    );
+    let regex = Regex::new(&expression).ok()?;
+    regex.is_match(path).then_some(pattern.replace('*', "").len())
+}
+
+#[derive(Clone)]
+struct HostRateLimiter {
+    hosts: Arc<Mutex<std::collections::HashMap<String, HostRateState>>>,
+    delay: Duration,
+    max_concurrent: usize,
+}
+
+struct HostRateState {
+    next_request_at: Instant,
+    permits: Arc<Semaphore>,
+}
+
+struct HostRequestPermit {
+    _permit: OwnedSemaphorePermit,
+}
+
+impl HostRateLimiter {
+    fn new(delay: Duration, max_concurrent: usize) -> Self {
+        Self {
+            hosts: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            delay,
+            max_concurrent: max_concurrent.max(1),
+        }
+    }
+
+    async fn acquire(&self, url: &Url) -> Result<HostRequestPermit, Box<dyn Error + Send + Sync>> {
+        let host = host_key(url);
+        let permits = {
+            let mut hosts = self.hosts.lock().await;
+            hosts
+                .entry(host.clone())
+                .or_insert_with(|| HostRateState {
+                    next_request_at: Instant::now(),
+                    permits: Arc::new(Semaphore::new(self.max_concurrent)),
+                })
+                .permits
+                .clone()
+        };
+        let permit = permits.acquire_owned().await.map_err(|_| {
+            Box::new(io::Error::new(
+                io::ErrorKind::Other,
+                format!("host request limiter was closed for {host}"),
+            )) as Box<dyn Error + Send + Sync>
+        })?;
+        let wait_until = {
+            let mut hosts = self.hosts.lock().await;
+            let state = hosts.get_mut(&host).ok_or_else(|| {
+                Box::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("missing host request limiter state for {host}"),
+                )) as Box<dyn Error + Send + Sync>
+            })?;
+            let now = Instant::now();
+            let wait_until = state.next_request_at.max(now);
+            state.next_request_at = wait_until + self.delay;
+            wait_until
+        };
+        tokio::time::sleep_until(wait_until).await;
+
+        Ok(HostRequestPermit { _permit: permit })
+    }
+}
+
+fn host_key(url: &Url) -> String {
+    format!(
+        "{}://{}:{}",
+        url.scheme(),
+        url.host_str().unwrap_or_default(),
+        url.port_or_known_default().unwrap_or_default()
+    )
+}
+
 #[derive(Clone, Debug)]
 struct CrawlCandidate {
     url: Url,
     depth: usize,
+    /// Configured start/sitemap/feed entries remain first-class; only URLs
+    /// found while parsing a fetched payload are subject to robots and pacing.
+    discovered: bool,
 }
 
 struct CrawlPlan {
@@ -242,7 +539,13 @@ impl CrawlPlan {
                 Ok(url) => unique.insert(url_key(url)),
                 Err(_) => true,
             })
-            .map(|result| result.map(|url| CrawlCandidate { url, depth: 0 }))
+            .map(|result| {
+                result.map(|url| CrawlCandidate {
+                    url,
+                    depth: 0,
+                    discovered: false,
+                })
+            })
             .collect()
     }
 
@@ -468,13 +771,16 @@ fn source_fetch_urls(source: &Source) -> Result<Vec<Url>, Box<dyn Error + Send +
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use policy_shared::{Region, Source, SourceCategory};
     use reqwest::{StatusCode, Url};
     use serde_json::json;
+    use tokio::time::timeout;
 
     use super::{
-        extract_discovery_links, is_retryable_status, source_fetch_urls, CrawlPlan, FetchedPayload,
-        DOCUMENT_ACCEPT_HEADER,
+        extract_discovery_links, is_retryable_status, parse_robots_rules, robots_allows,
+        source_fetch_urls, CrawlPlan, FetchedPayload, HostRateLimiter, DOCUMENT_ACCEPT_HEADER,
     };
 
     fn source(crawl_config: serde_json::Value) -> Source {
@@ -596,6 +902,53 @@ mod tests {
 
         assert_eq!(extract_discovery_links(&sitemap).unwrap(), ["/news/one", "https://example.gov/news/two"]);
         assert_eq!(extract_discovery_links(&feed).unwrap(), ["/news/three", "/news/four"]);
+    }
+
+    #[test]
+    fn robots_rules_use_the_specific_user_agent_and_longest_matching_path() {
+        let rules = parse_robots_rules(
+            "\
+             User-agent: *\n\
+             Disallow: /private\n\
+             User-agent: policy-source-crawler\n\
+             Disallow: /staff\n\
+             Allow: /staff/public\n",
+            "policy-source-crawler/1.0",
+        );
+
+        assert!(!robots_allows(&rules, &Url::parse("https://example.gov/staff/internal").unwrap()));
+        assert!(robots_allows(&rules, &Url::parse("https://example.gov/staff/public/report").unwrap()));
+        assert!(robots_allows(&rules, &Url::parse("https://example.gov/private").unwrap()));
+    }
+
+    #[tokio::test]
+    async fn host_limiter_caps_concurrent_requests() {
+        let limiter = HostRateLimiter::new(Duration::ZERO, 1);
+        let url = Url::parse("https://example.gov/news").unwrap();
+        let first = limiter.acquire(&url).await.unwrap();
+        let next_limiter = limiter.clone();
+        let next_url = url.clone();
+        let mut second = tokio::spawn(async move { next_limiter.acquire(&next_url).await });
+
+        assert!(timeout(Duration::from_millis(20), &mut second).await.is_err());
+        drop(first);
+        assert!(matches!(
+            timeout(Duration::from_millis(100), &mut second).await,
+            Ok(Ok(Ok(_)))
+        ));
+    }
+
+    #[tokio::test]
+    async fn host_limiter_spaces_discovered_requests() {
+        let limiter = HostRateLimiter::new(Duration::from_millis(20), 2);
+        let url = Url::parse("https://example.gov/news").unwrap();
+        let first = limiter.acquire(&url).await.unwrap();
+        drop(first);
+
+        let started = tokio::time::Instant::now();
+        let second = limiter.acquire(&url).await.unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(15));
+        drop(second);
     }
 
     #[test]
