@@ -1,17 +1,39 @@
+import { DEFAULT_CHANGE_FEED_SORT, type ChangeFeedSort } from "../api/client";
+
 type FeedFilterBarProps = {
   region: string;
   agency: string;
   status: string;
   category: string;
-  onChange: (name: "region" | "agency" | "status" | "category", value: string) => void;
+  sort: ChangeFeedSort;
+  onChange: (name: "region" | "agency" | "status" | "category" | "sort", value: string) => void;
   onClear: () => void;
 };
 
-export function FeedFilterBar({ agency, category, onChange, onClear, region, status }: FeedFilterBarProps) {
-  const hasFilters = Boolean(region || agency || status || category);
+export function FeedFilterBar({
+  agency,
+  category,
+  onChange,
+  onClear,
+  region,
+  sort,
+  status,
+}: FeedFilterBarProps) {
+  const hasFilters = Boolean(
+    region || agency || status || category || sort !== DEFAULT_CHANGE_FEED_SORT,
+  );
 
   return (
     <div className="feed-filter-bar" aria-label="Filter policy changes">
+      <label>
+        <span>Sort by</span>
+        <select onChange={(event) => onChange("sort", event.target.value)} value={sort}>
+          <option value="published_desc">Newest published first</option>
+          <option value="published_asc">Oldest published first</option>
+          <option value="observed_desc">Newest observed first</option>
+          <option value="observed_asc">Oldest observed first</option>
+        </select>
+      </label>
       <label>
         <span>Region</span>
         <select onChange={(event) => onChange("region", event.target.value)} value={region}>

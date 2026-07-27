@@ -11,12 +11,17 @@ import { StatusTag } from "./StatusTag";
 type ChangeFeedRowProps = {
   item: ChangeFeedItem;
   isNewSinceLastVisit: boolean;
+  dateKind?: "publication" | "observation";
 };
 
-export function ChangeFeedRow({ isNewSinceLastVisit, item }: ChangeFeedRowProps) {
+export function ChangeFeedRow({
+  dateKind = "publication",
+  isNewSinceLastVisit,
+  item,
+}: ChangeFeedRowProps) {
   const [expanded, setExpanded] = useState(false);
   const detail = useEntryDetail(expanded ? String(item.entry_id) : undefined);
-  const displayDate = item.publication_date ?? item.changed_at;
+  const displayDate = dateKind === "publication" ? item.publication_date : item.changed_at;
   const detailId = `entry-detail-${item.entry_id}`;
 
   return (
@@ -40,7 +45,7 @@ export function ChangeFeedRow({ isNewSinceLastVisit, item }: ChangeFeedRowProps)
         <span role="cell">
           <StatusTag status={item.status} />
         </span>
-        <time dateTime={displayDate} role="cell">
+        <time dateTime={displayDate ?? undefined} role="cell">
           {formatDate(displayDate)}
         </time>
         <span className="row-actions" role="cell">

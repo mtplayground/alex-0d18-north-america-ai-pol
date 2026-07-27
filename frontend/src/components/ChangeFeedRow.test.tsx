@@ -40,4 +40,32 @@ describe("ChangeFeedRow", () => {
       "https://example.test/policies/e2e-2026-0001",
     );
   });
+
+  it("shows the crawler observation date when the observed sort is active", () => {
+    const record = fixture.results[0];
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <ChangeFeedRow
+          dateKind="observation"
+          isNewSinceLastVisit={false}
+          item={{
+            entry_id: 2,
+            title: record.title,
+            region: "us",
+            source_category: "policy",
+            agency: record.agency_names[0],
+            publication_date: record.publication_date,
+            status: record.status,
+            source_url: record.html_url,
+            change_summary: null,
+            changed_at: "2026-07-25T12:00:00Z",
+          }}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(container.querySelector("time")?.getAttribute("datetime")).toBe("2026-07-25T12:00:00Z");
+  });
 });
