@@ -131,7 +131,7 @@ h2 {
   border-top: 1px solid #303438;
   display: grid;
   gap: 0.65rem;
-  grid-template-columns: 8rem minmax(9rem, 1fr) minmax(8rem, 0.8fr) auto;
+  grid-template-columns: 8rem minmax(8rem, 0.8fr) minmax(9rem, 1fr) minmax(8rem, 0.8fr) auto;
   padding: 0.7rem 1.1rem;
 }
 .feed-filter-bar label {
@@ -239,6 +239,28 @@ h2 {
   letter-spacing: 0.04em;
   padding: 0.1rem 0.3rem;
   text-transform: uppercase;
+}
+.source-category-tag {
+  border: 1px solid #4a5058;
+  border-radius: 999px;
+  color: #c5cbd3;
+  flex: none;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.3rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.source-category-tag.is-news {
+  background: #1a3347;
+  border-color: #346887;
+  color: #a8d8f5;
+}
+.source-category-tag.is-policy {
+  background: #302b45;
+  border-color: #65558c;
+  color: #d4c6fa;
 }
 .policy-cell small,
 .region-cell,

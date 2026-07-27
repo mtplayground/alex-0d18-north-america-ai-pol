@@ -5,6 +5,7 @@ import { useEntryDetail } from "../api/hooks";
 import { formatDate } from "../formatters";
 
 import { EntryDetailPanel } from "./EntryDetailPanel";
+import { SourceCategoryTag } from "./SourceCategoryTag";
 import { StatusTag } from "./StatusTag";
 
 type ChangeFeedRowProps = {
@@ -27,6 +28,7 @@ export function ChangeFeedRow({ isNewSinceLastVisit, item }: ChangeFeedRowProps)
         <span className="policy-cell" role="cell">
           <span className="policy-title-line">
             <strong>{item.title}</strong>
+            <SourceCategoryTag category={item.source_category} />
             {isNewSinceLastVisit && <span className="new-marker">New</span>}
           </span>
           <small>{item.agency}</small>

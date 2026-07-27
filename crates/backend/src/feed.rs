@@ -18,7 +18,7 @@ pub async fn list_changes(
     Query(query): Query<ChangeFeedQuery>,
 ) -> Result<Json<ChangeFeedResponse>, FeedError> {
     let (limit, offset) = query.pagination();
-    let (region, agency, status) = query.filters();
+    let (region, agency, status, category) = query.filters();
     let rows = sqlx::query_as::<_, FeedRow>(
         "SELECT entries.id AS entry_id, entries.title, entries.region, sources.category AS source_category, entries.agency, entries.publication_date, \
          entries.status, entries.source_url, latest.change_summary, latest.observed_at \
@@ -34,6 +34,7 @@ pub async fn list_changes(
          WHERE ($3::TEXT IS NULL OR entries.region = $3) \
            AND ($4::TEXT IS NULL OR entries.agency = $4) \
            AND ($5::TEXT IS NULL OR entries.status = $5) \
+           AND ($6::TEXT IS NULL OR sources.category = $6) \
          ORDER BY latest.observed_at DESC, latest.id DESC \
          LIMIT $1 OFFSET $2",
     )
@@ -42,6 +43,7 @@ pub async fn list_changes(
     .bind(region)
     .bind(agency)
     .bind(status)
+    .bind(category)
     .fetch_all(&database.pool)
     .await
     .map_err(FeedError::Database)?;
@@ -102,7 +104,7 @@ impl IntoResponse for FeedError {
     fn into_response(self) -> axum::response::Response {
         match self {
             Self::Database(error) => {
-                eprintln!("change-feed query failed: {error}");
+                eprintln!("change-feed query failed: {error:?}");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }

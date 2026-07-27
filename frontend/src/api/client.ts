@@ -2,6 +2,7 @@ export type ChangeFeedFilters = {
   region?: string;
   agency?: string;
   status?: string;
+  category?: "policy" | "news";
   limit?: number;
   offset?: number;
 };

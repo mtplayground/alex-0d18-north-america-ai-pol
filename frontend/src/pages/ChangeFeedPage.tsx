@@ -10,15 +10,18 @@ export function ChangeFeedPage() {
   const region = searchParams.get("region") ?? "";
   const agency = searchParams.get("agency") ?? "";
   const status = searchParams.get("status") ?? "";
+  const categoryParam = searchParams.get("category");
+  const category = categoryParam === "policy" || categoryParam === "news" ? categoryParam : "";
   const lastVisit = useLastVisit();
   const { data, error, isPending } = useChangeFeed({
     limit: 40,
     ...(region && { region }),
     ...(agency && { agency }),
     ...(status && { status }),
+    ...(category && { category }),
   });
 
-  const updateFilter = (name: "region" | "agency" | "status", value: string) => {
+  const updateFilter = (name: "region" | "agency" | "status" | "category", value: string) => {
     const next = new URLSearchParams(searchParams);
     if (value) {
       next.set(name, value);
@@ -48,6 +51,7 @@ export function ChangeFeedPage() {
       </div>
       <FeedFilterBar
         agency={agency}
+        category={category}
         onChange={updateFilter}
         onClear={clearFilters}
         region={region}
