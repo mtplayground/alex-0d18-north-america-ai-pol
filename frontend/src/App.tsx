@@ -10,20 +10,20 @@ function AppShell() {
     <div className="console-shell">
       <aside className="console-sidebar">
         <Link className="product-mark" to="/">
-          Policy workspace
+          AI news + policy
         </Link>
         <nav aria-label="Primary navigation">
           <NavLink end to="/">
             Change feed
           </NavLink>
         </nav>
-        <p className="sidebar-note">North America policy monitoring</p>
+        <p className="sidebar-note">Global AI news and policy monitoring</p>
       </aside>
       <main className="console-main">
         <header className="console-header">
           <div>
-            <p className="section-kicker">Monitoring</p>
-            <h1>Policy change console</h1>
+            <p className="section-kicker">AI intelligence</p>
+            <h1>AI news + policy console</h1>
           </div>
           <span className="live-indicator">Live data</span>
         </header>
