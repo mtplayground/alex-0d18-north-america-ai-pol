@@ -46,7 +46,7 @@ fn normalize_xml(
     source: &Source,
     document: SourceDocument<'_>,
 ) -> Result<Vec<NormalizedPolicyRecord>, NormalizationError> {
-    let (feed_name, articles) = parse_xml_articles(document.body)?;
+    let articles = parse_xml_articles(document.body)?;
 
     Ok(articles
         .into_iter()
@@ -54,7 +54,6 @@ fn normalize_xml(
             normalize_article(
                 source,
                 document.source_url,
-                feed_name.as_deref(),
                 article.title,
                 article.identifier,
                 article.link,
@@ -96,7 +95,6 @@ fn normalize_json(
             normalize_article(
                 source,
                 document.source_url,
-                None,
                 title,
                 identifier,
                 link,
@@ -112,7 +110,6 @@ fn normalize_json(
 fn normalize_article(
     source: &Source,
     document_url: &str,
-    feed_name: Option<&str>,
     title: Option<String>,
     identifier: Option<String>,
     link: Option<String>,
@@ -132,9 +129,7 @@ fn normalize_article(
                 .and_then(|value| resolve_article_url(document_url, value))
         })?;
     let source_external_id = identifier.unwrap_or_else(|| source_url.clone());
-    let agency = non_empty(article_source_name)
-        .or_else(|| feed_name.map(ToOwned::to_owned).and_then(|value| non_empty(Some(value))))
-        .unwrap_or_else(|| source.agency.clone());
+    let agency = non_empty(article_source_name).unwrap_or_else(|| source.agency.clone());
     let publication_date = publication_date.as_deref().and_then(parse_publication_date);
     let canonical_content = json!({
         "title": title,
@@ -156,16 +151,13 @@ fn normalize_article(
     })
 }
 
-fn parse_xml_articles(
-    body: &[u8],
-) -> Result<(Option<String>, Vec<XmlArticle>), NormalizationError> {
+fn parse_xml_articles(body: &[u8]) -> Result<Vec<XmlArticle>, NormalizationError> {
     let mut reader = Reader::from_reader(body);
     reader.trim_text(true);
     let mut buffer = Vec::new();
     let mut articles = Vec::new();
     let mut article = None;
     let mut current_tag = None;
-    let mut feed_name = None;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -202,21 +194,11 @@ fn parse_xml_articles(
                         NormalizationError::new(format!("invalid escaped XML text: {error}"))
                     })?
                     .into_owned();
-                apply_xml_text(
-                    article.as_mut(),
-                    current_tag.as_deref(),
-                    &mut feed_name,
-                    text,
-                );
+                apply_xml_text(article.as_mut(), current_tag.as_deref(), text);
             }
             Ok(Event::CData(text)) => {
                 let text = String::from_utf8_lossy(text.as_ref()).into_owned();
-                apply_xml_text(
-                    article.as_mut(),
-                    current_tag.as_deref(),
-                    &mut feed_name,
-                    text,
-                );
+                apply_xml_text(article.as_mut(), current_tag.as_deref(), text);
             }
             Ok(Event::End(element)) => {
                 let tag = tag_name(element.name().as_ref());
@@ -238,13 +220,12 @@ fn parse_xml_articles(
         buffer.clear();
     }
 
-    Ok((feed_name, articles))
+    Ok(articles)
 }
 
 fn apply_xml_text(
     article: Option<&mut XmlArticle>,
     current_tag: Option<&str>,
-    feed_name: &mut Option<String>,
     text: String,
 ) {
     let Some(text) = non_empty(Some(text)) else {
@@ -265,7 +246,6 @@ fn apply_xml_text(
             }
         }
         (Some(article), Some("source" | "publisher")) => article.source_name = Some(text),
-        (None, Some("title")) if feed_name.is_none() => *feed_name = Some(text),
         _ => {}
     }
 }
@@ -378,11 +358,15 @@ mod tests {
     use super::AiNewsNormalizer;
 
     fn news_source() -> Source {
+        news_source_with_agency("Configured AI news source")
+    }
+
+    fn news_source_with_agency(agency: &str) -> Source {
         Source {
             id: 7,
             region: Region::Global,
             category: SourceCategory::News,
-            agency: "Configured AI news source".to_owned(),
+            agency: agency.to_owned(),
             base_url: "https://news.example.test".to_owned(),
             crawl_config: json!({}),
             enabled: true,
@@ -407,7 +391,7 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].source_external_id, "guid-1");
         assert_eq!(records[0].source_url, "https://news.example.test/articles/first");
-        assert_eq!(records[0].agency, "AI Wire");
+        assert_eq!(records[0].agency, "Configured AI news source");
         assert_eq!(records[1].source_external_id, "guid-2");
     }
 
@@ -461,5 +445,65 @@ mod tests {
         assert!(AiNewsNormalizer.supports(&source));
         source.category = SourceCategory::Policy;
         assert!(!AiNewsNormalizer.supports(&source));
+    }
+
+    #[test]
+    fn seeded_ai_news_feeds_emit_article_records_with_configured_sources() {
+        let feeds = [
+            (
+                "OpenAI News",
+                "https://openai.com/news/rss.xml",
+                br#"<rss><channel><title>OpenAI News</title><item><title>Launching Health in ChatGPT</title><link>https://openai.com/index/health-in-chatgpt</link><guid>https://openai.com/index/health-in-chatgpt</guid><pubDate>Thu, 23 Jul 2026 00:00:00 GMT</pubDate></item></channel></rss>"# as &[u8],
+                "Launching Health in ChatGPT",
+                "https://openai.com/index/health-in-chatgpt",
+                "2026-07-23",
+            ),
+            (
+                "Google AI Blog",
+                "https://blog.google/technology/ai/rss/",
+                br#"<rss><channel><title>AI</title><item><title>3 Google updates from Galaxy Unpacked 2026</title><link>https://blog.google/products-and-platforms/platforms/android/galaxy-unpacked-2026/</link><pubDate>Wed, 22 Jul 2026 13:00:00 +0000</pubDate><guid>https://blog.google/products-and-platforms/platforms/android/galaxy-unpacked-2026/</guid></item></channel></rss>"# as &[u8],
+                "3 Google updates from Galaxy Unpacked 2026",
+                "https://blog.google/products-and-platforms/platforms/android/galaxy-unpacked-2026/",
+                "2026-07-22",
+            ),
+            (
+                "Hugging Face Blog",
+                "https://huggingface.co/blog/feed.xml",
+                br#"<rss><channel><title>Hugging Face - Blog</title><item><title>Bringing Nunchaku 4-bit Diffusion Inference to Diffusers</title><pubDate>Thu, 23 Jul 2026 00:00:00 GMT</pubDate><link>https://huggingface.co/blog/nunchaku-diffusers</link><guid>https://huggingface.co/blog/nunchaku-diffusers</guid></item></channel></rss>"# as &[u8],
+                "Bringing Nunchaku 4-bit Diffusion Inference to Diffusers",
+                "https://huggingface.co/blog/nunchaku-diffusers",
+                "2026-07-23",
+            ),
+            (
+                "MIT Technology Review AI",
+                "https://www.technologyreview.com/topic/artificial-intelligence/feed/",
+                br#"<rss><channel><title>MIT Technology Review AI</title><item><title>How AI helps scientists design the next generation of medicines</title><link>https://www.technologyreview.com/2026/07/23/1140346/how-ai-helps-scientists-design-the-next-generation-of-medicines/</link><pubDate>Thu, 23 Jul 2026 12:00:00 +0000</pubDate><guid>https://www.technologyreview.com/?p=1140346</guid></item></channel></rss>"# as &[u8],
+                "How AI helps scientists design the next generation of medicines",
+                "https://www.technologyreview.com/2026/07/23/1140346/how-ai-helps-scientists-design-the-next-generation-of-medicines/",
+                "2026-07-23",
+            ),
+        ];
+
+        for (agency, source_url, body, title, article_url, date) in feeds {
+            let document = SourceDocument {
+                source_url,
+                content_type: "application/rss+xml",
+                body,
+            };
+            let records = match AiNewsNormalizer.normalize(&news_source_with_agency(agency), document) {
+                Ok(records) => records,
+                Err(error) => panic!("{agency} feed should normalize: {error}"),
+            };
+
+            assert_eq!(records.len(), 1, "{agency}");
+            assert_eq!(records[0].title, title, "{agency}");
+            assert_eq!(records[0].source_url, article_url, "{agency}");
+            assert_eq!(records[0].agency, agency, "{agency}");
+            assert_eq!(
+                records[0].publication_date.map(|value| value.to_string()),
+                Some(date.to_owned()),
+                "{agency}"
+            );
+        }
     }
 }
