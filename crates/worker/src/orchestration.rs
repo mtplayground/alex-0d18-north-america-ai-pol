@@ -3,8 +3,8 @@
 use std::{collections::HashSet, error::Error};
 
 use policy_shared::{
-    NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, Region, Source, SourceCategory,
-    SourceDocument,
+    validate_record_quality, NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, Region,
+    Source, SourceCategory, SourceDocument,
 };
 use sha2::Digest;
 use sqlx::{postgres::PgPool, FromRow};
@@ -152,14 +152,22 @@ impl IngestionOrchestrator {
             .iter()
             .find(|normalizer| normalizer.supports(&document.source))
         {
-            normalizer.normalize(
+            let records = normalizer.normalize(
                 &document.source,
                 SourceDocument {
                     source_url: &document.source_url,
                     content_type: &document.content_type,
                     body: &document.raw_document,
                 },
-            )?
+            )?;
+            let (records, rejected) = retain_quality_records(records, &document.source_url);
+            if rejected > 0 {
+                println!(
+                    "dropped {rejected} low-quality records from source {} before persistence",
+                    document.source_id
+                );
+            }
+            records
         } else {
             println!("no normalizer is configured for source {}", document.source_id);
             Vec::new()
@@ -427,13 +435,31 @@ fn normalized_identity_component(value: &str) -> String {
         .to_ascii_lowercase()
 }
 
+fn retain_quality_records(
+    records: Vec<NormalizedPolicyRecord>,
+    document_url: &str,
+) -> (Vec<NormalizedPolicyRecord>, usize) {
+    let mut accepted = Vec::with_capacity(records.len());
+    let mut rejected = 0;
+
+    for record in records {
+        if validate_record_quality(&record, document_url).is_ok() {
+            accepted.push(record);
+        } else {
+            rejected += 1;
+        }
+    }
+
+    (accepted, rejected)
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::NaiveDate;
     use policy_shared::{NormalizedPolicyRecord, Region};
     use serde_json::json;
 
-    use super::RecordDeduplicator;
+    use super::{retain_quality_records, RecordDeduplicator};
 
     fn record(
         external_id: &str,
@@ -479,5 +505,25 @@ mod tests {
         assert_eq!(deduplicator.retain_unique(1, &mut records), 1);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].source_external_id, "policy-1");
+    }
+
+    #[test]
+    fn drops_landing_page_records_before_deduplication_and_persistence() {
+        let document_url = "https://example.test/feed";
+        let record = NormalizedPolicyRecord {
+            source_external_id: document_url.to_owned(),
+            title: "Language selection".to_owned(),
+            region: Region::UnitedStates,
+            agency: "Example Agency".to_owned(),
+            publication_date: None,
+            status: "published".to_owned(),
+            source_url: document_url.to_owned(),
+            canonical_content: json!({ "title": "Language selection" }),
+        };
+
+        let (accepted, rejected) = retain_quality_records(vec![record], document_url);
+
+        assert!(accepted.is_empty());
+        assert_eq!(rejected, 1);
     }
 }
