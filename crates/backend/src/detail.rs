@@ -21,8 +21,10 @@ pub async fn get_entry(
     State(database): State<Database>,
 ) -> Result<Json<EntryDetailResponse>, DetailError> {
     let entry = sqlx::query_as::<_, EntryRow>(
-        "SELECT id, source_id, source_external_id, title, region, agency, publication_date, \
-         status, source_url FROM policy_entries WHERE id = $1",
+        "SELECT entries.id, entries.source_id, entries.source_external_id, entries.title, entries.region, \
+         sources.category AS source_category, entries.agency, entries.publication_date, entries.status, \
+         entries.source_url FROM policy_entries AS entries \
+         JOIN sources ON sources.id = entries.source_id WHERE entries.id = $1",
     )
     .bind(entry_id)
     .fetch_optional(&database.pool)
@@ -57,6 +59,7 @@ struct EntryRow {
     source_external_id: String,
     title: String,
     region: String,
+    source_category: String,
     agency: String,
     publication_date: Option<NaiveDate>,
     status: String,
@@ -71,6 +74,7 @@ impl EntryRow {
             source_external_id: self.source_external_id,
             title: self.title,
             region: self.region,
+            source_category: self.source_category,
             agency: self.agency,
             publication_date: self.publication_date,
             status: self.status,

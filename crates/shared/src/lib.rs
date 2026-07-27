@@ -14,7 +14,7 @@ pub mod source;
 
 pub use config::{BackendConfig, ConfigError, WorkerConfig};
 pub use change_feed::{ChangeFeedItem, ChangeFeedQuery, ChangeFeedResponse};
-pub use domain::Region;
+pub use domain::{Region, SourceCategory};
 pub use entry_detail::{EntryDetail, EntryDetailResponse, EntryVersionDetail};
 pub use normalization::{
     NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, SourceDocument,

@@ -49,6 +49,8 @@ pub struct ChangeFeedItem {
     pub entry_id: i64,
     pub title: String,
     pub region: String,
+    /// Category of the source that published this entry.
+    pub source_category: String,
     pub agency: String,
     pub publication_date: Option<NaiveDate>,
     pub status: String,

@@ -59,7 +59,7 @@ mod e2e_tests {
     };
     use policy_shared::{
         config::AiSummarizerConfig, ChangeFeedQuery, PolicyNormalizer, Region, Source,
-        SourceDocument,
+        SourceCategory, SourceDocument,
     };
     use policy_worker::{
         change_detection::ChangeDetector, fetcher::SourceFetcher, summarizer::AiSummarizer,
@@ -89,6 +89,7 @@ mod e2e_tests {
         let source = Source {
             id: source_id,
             region: Region::UnitedStates,
+            category: SourceCategory::Policy,
             agency: agency.clone(),
             base_url: fixture_base_url.clone(),
             crawl_config: json!({ "start_paths": ["/fixture/policy-feed.json"] }),

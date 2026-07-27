@@ -19,6 +19,7 @@ describe("ChangeFeedRow", () => {
             entry_id: 1,
             title: record.title,
             region: "us",
+            source_category: "policy",
             agency: record.agency_names[0],
             publication_date: record.publication_date,
             status: record.status,

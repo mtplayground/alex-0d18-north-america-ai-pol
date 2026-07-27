@@ -14,6 +14,8 @@ pub struct EntryDetail {
     pub source_external_id: String,
     pub title: String,
     pub region: String,
+    /// Category of the source that published this entry.
+    pub source_category: String,
     pub agency: String,
     pub publication_date: Option<NaiveDate>,
     pub status: String,
