@@ -7,19 +7,20 @@ use axum::{
     Json,
 };
 use chrono::{DateTime, NaiveDate, Utc};
-use policy_shared::{ChangeFeedItem, ChangeFeedQuery, ChangeFeedResponse};
+use policy_shared::{ChangeFeedItem, ChangeFeedQuery, ChangeFeedResponse, ChangeFeedSort};
 use sqlx::FromRow;
 
 use crate::db::Database;
 
-/// Returns the latest version of every policy entry, newest changes first.
+/// Returns the latest version of every policy entry in the requested stable order.
 pub async fn list_changes(
     State(database): State<Database>,
     Query(query): Query<ChangeFeedQuery>,
 ) -> Result<Json<ChangeFeedResponse>, FeedError> {
     let (limit, offset) = query.pagination();
     let (region, agency, status, category) = query.filters();
-    let rows = sqlx::query_as::<_, FeedRow>(
+    let order_by = order_by(query.sort());
+    let sql = format!(
         "WITH candidate_rows AS ( \
              SELECT entries.id AS entry_id, entries.title, entries.region, sources.category AS source_category, entries.agency, entries.publication_date, \
                     entries.status, entries.source_url, latest.change_summary, latest.observed_at, latest.id AS latest_version_id, \
@@ -51,9 +52,10 @@ pub async fn list_changes(
          ) \
          SELECT entry_id, title, region, source_category, agency, publication_date, status, source_url, change_summary, observed_at \
          FROM deduplicated_rows \
-         ORDER BY observed_at DESC, latest_version_id DESC, entry_id DESC \
-         LIMIT $1 OFFSET $2",
-    )
+         ORDER BY {order_by} \
+         LIMIT $1 OFFSET $2"
+    );
+    let rows = sqlx::query_as::<_, FeedRow>(&sql)
     .bind(i64::from(limit) + 1)
     .bind(i64::from(offset))
     .bind(region)
@@ -77,6 +79,23 @@ pub async fn list_changes(
         offset,
         next_offset: has_next_page.then_some(offset.saturating_add(limit)),
     }))
+}
+
+/// Returns a fixed SQL ordering fragment for a validated shared enum value.
+///
+/// The fragment is never derived from request text, so it remains safe to
+/// compose into the otherwise parameterized feed query.
+const fn order_by(sort: ChangeFeedSort) -> &'static str {
+    match sort {
+        ChangeFeedSort::PublishedDesc => {
+            "publication_date DESC NULLS LAST, observed_at DESC, latest_version_id DESC, entry_id DESC"
+        }
+        ChangeFeedSort::PublishedAsc => {
+            "publication_date ASC NULLS LAST, observed_at DESC, latest_version_id DESC, entry_id DESC"
+        }
+        ChangeFeedSort::ObservedDesc => "observed_at DESC, latest_version_id DESC, entry_id DESC",
+        ChangeFeedSort::ObservedAsc => "observed_at ASC, latest_version_id DESC, entry_id DESC",
+    }
 }
 
 #[derive(FromRow)]
@@ -124,5 +143,32 @@ impl IntoResponse for FeedError {
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use policy_shared::ChangeFeedSort;
+
+    use super::order_by;
+
+    #[test]
+    fn sort_orders_are_stable_and_keep_unknown_publication_dates_last() {
+        assert_eq!(
+            order_by(ChangeFeedSort::PublishedDesc),
+            "publication_date DESC NULLS LAST, observed_at DESC, latest_version_id DESC, entry_id DESC"
+        );
+        assert_eq!(
+            order_by(ChangeFeedSort::PublishedAsc),
+            "publication_date ASC NULLS LAST, observed_at DESC, latest_version_id DESC, entry_id DESC"
+        );
+        assert_eq!(
+            order_by(ChangeFeedSort::ObservedDesc),
+            "observed_at DESC, latest_version_id DESC, entry_id DESC"
+        );
+        assert_eq!(
+            order_by(ChangeFeedSort::ObservedAsc),
+            "observed_at ASC, latest_version_id DESC, entry_id DESC"
+        );
     }
 }
