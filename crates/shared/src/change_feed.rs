@@ -1,10 +1,25 @@
-//! DTOs for the reverse-chronological policy change feed.
+//! DTOs for the sortable policy change feed.
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_LIMIT: u32 = 20;
 const MAX_LIMIT: u32 = 100;
+
+/// Supported sort orders for the change feed.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeFeedSort {
+    /// Most recently published entries first, with unknown publication dates last.
+    #[default]
+    PublishedDesc,
+    /// Oldest published entries first, with unknown publication dates last.
+    PublishedAsc,
+    /// Most recently observed crawler changes first.
+    ObservedDesc,
+    /// Oldest observed crawler changes first.
+    ObservedAsc,
+}
 
 /// Query parameters accepted by the change-feed endpoint.
 #[derive(Debug, Default, Deserialize)]
@@ -21,6 +36,8 @@ pub struct ChangeFeedQuery {
     pub status: Option<String>,
     /// Source category to include, such as `policy` or `news`.
     pub category: Option<String>,
+    /// Ordering of items in the response. Missing values use newest publication first.
+    pub sort: Option<ChangeFeedSort>,
 }
 
 impl ChangeFeedQuery {
@@ -38,6 +55,11 @@ impl ChangeFeedQuery {
             normalized_filter(self.status.as_deref()).map(str::to_owned),
             normalized_filter(self.category.as_deref()).map(str::to_ascii_lowercase),
         )
+    }
+
+    /// Returns the requested feed order, defaulting to newest publication first.
+    pub fn sort(&self) -> ChangeFeedSort {
+        self.sort.unwrap_or_default()
     }
 }
 
@@ -73,7 +95,9 @@ pub struct ChangeFeedResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::ChangeFeedQuery;
+    use serde_json::json;
+
+    use super::{ChangeFeedQuery, ChangeFeedSort};
 
     #[test]
     fn pagination_uses_defaults_and_bounds_the_limit() {
@@ -108,5 +132,22 @@ mod tests {
                 Some("news".to_owned()),
             )
         );
+    }
+
+    #[test]
+    fn sort_defaults_to_newest_published_and_accepts_each_wire_value() {
+        assert_eq!(ChangeFeedQuery::default().sort(), ChangeFeedSort::PublishedDesc);
+
+        for (wire_value, expected) in [
+            ("published_desc", ChangeFeedSort::PublishedDesc),
+            ("published_asc", ChangeFeedSort::PublishedAsc),
+            ("observed_desc", ChangeFeedSort::ObservedDesc),
+            ("observed_asc", ChangeFeedSort::ObservedAsc),
+        ] {
+            let query: ChangeFeedQuery =
+                serde_json::from_value(json!({ "sort": wire_value })).expect("valid sort");
+
+            assert_eq!(query.sort(), expected);
+        }
     }
 }
