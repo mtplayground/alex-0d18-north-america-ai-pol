@@ -1,3 +1,18 @@
+export const CHANGE_FEED_SORTS = [
+  "published_desc",
+  "published_asc",
+  "observed_desc",
+  "observed_asc",
+] as const;
+
+export type ChangeFeedSort = (typeof CHANGE_FEED_SORTS)[number];
+
+export const DEFAULT_CHANGE_FEED_SORT: ChangeFeedSort = "published_desc";
+
+export function isChangeFeedSort(value: string | null): value is ChangeFeedSort {
+  return CHANGE_FEED_SORTS.some((sort) => sort === value);
+}
+
 export type ChangeFeedFilters = {
   region?: string;
   agency?: string;
@@ -5,6 +20,7 @@ export type ChangeFeedFilters = {
   category?: "policy" | "news";
   limit?: number;
   offset?: number;
+  sort?: ChangeFeedSort;
 };
 
 export type ChangeFeedItem = {

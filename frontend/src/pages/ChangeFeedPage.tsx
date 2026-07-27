@@ -1,5 +1,6 @@
 import { useSearchParams } from "react-router-dom";
 
+import { DEFAULT_CHANGE_FEED_SORT, isChangeFeedSort } from "../api/client";
 import { useChangeFeed } from "../api/hooks";
 import { ChangeFeedRow } from "../components/ChangeFeedRow";
 import { FeedFilterBar } from "../components/FeedFilterBar";
@@ -12,16 +13,23 @@ export function ChangeFeedPage() {
   const status = searchParams.get("status") ?? "";
   const categoryParam = searchParams.get("category");
   const category = categoryParam === "policy" || categoryParam === "news" ? categoryParam : "";
+  const sortParam = searchParams.get("sort");
+  const sort = isChangeFeedSort(sortParam) ? sortParam : DEFAULT_CHANGE_FEED_SORT;
+  const sortsByPublicationDate = sort === "published_desc" || sort === "published_asc";
   const lastVisit = useLastVisit();
   const { data, error, isPending } = useChangeFeed({
     limit: 40,
+    sort,
     ...(region && { region }),
     ...(agency && { agency }),
     ...(status && { status }),
     ...(category && { category }),
   });
 
-  const updateFilter = (name: "region" | "agency" | "status" | "category", value: string) => {
+  const updateFilter = (
+    name: "region" | "agency" | "status" | "category" | "sort",
+    value: string,
+  ) => {
     const next = new URLSearchParams(searchParams);
     if (value) {
       next.set(name, value);
@@ -41,7 +49,11 @@ export function ChangeFeedPage() {
         <div>
           <p className="section-kicker">What’s new</p>
           <h2 id="feed-title">Latest changes</h2>
-          <p>Newest observed policy updates across tracked sources.</p>
+          <p>
+            {sortsByPublicationDate
+              ? "Policy updates ordered by publication date across tracked sources."
+              : "Policy updates ordered by crawler observation across tracked sources."}
+          </p>
         </div>
         <span className="result-count">
           {data
@@ -55,6 +67,7 @@ export function ChangeFeedPage() {
         onChange={updateFilter}
         onClear={clearFilters}
         region={region}
+        sort={sort}
         status={status}
       />
       {isPending && <p className="empty-state">Loading policy changes…</p>}
@@ -66,7 +79,7 @@ export function ChangeFeedPage() {
             <span role="columnheader">Policy and what changed</span>
             <span role="columnheader">Region</span>
             <span role="columnheader">Status</span>
-            <span role="columnheader">Date</span>
+            <span role="columnheader">{sortsByPublicationDate ? "Published" : "Observed"}</span>
             <span role="columnheader">Actions</span>
           </div>
           {data.items.map((item) => (
@@ -74,6 +87,7 @@ export function ChangeFeedPage() {
               isNewSinceLastVisit={changedSince(item.changed_at, lastVisit)}
               item={item}
               key={`${item.source_url}-${item.changed_at}`}
+              dateKind={sortsByPublicationDate ? "publication" : "observation"}
             />
           ))}
         </div>

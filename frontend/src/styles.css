@@ -131,7 +131,9 @@ h2 {
   border-top: 1px solid #303438;
   display: grid;
   gap: 0.65rem;
-  grid-template-columns: 8rem minmax(8rem, 0.8fr) minmax(9rem, 1fr) minmax(8rem, 0.8fr) auto;
+  grid-template-columns:
+    minmax(10rem, 1fr) 8rem minmax(8rem, 0.8fr) minmax(9rem, 1fr) minmax(8rem, 0.8fr)
+    auto;
   padding: 0.7rem 1.1rem;
 }
 .feed-filter-bar label {
