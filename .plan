@@ -1,40 +1,58 @@
-# Plan: feed polish, cadence, and deduplication
+# Plan: reliable policy and AI-news ingestion
 
-## Modules and file organization
+## Module structure and file organization
 
-- **#69 UI layout:** keep the change in `frontend/src/styles.css`, alongside the
-  existing `.feed-row` and `.row-actions` rules. Preserve the five-column order;
-  give Actions an explicit no-wrap minimum width and let the title column absorb
-  remaining width. Keep the existing narrow-screen column hiding behavior.
-- **#70 worker configuration:** change the default only in
-  `crates/shared/src/config.rs` (`WorkerConfig::from_env`), retaining
-  `SCHEDULER_CADENCE_SECONDS` parsing as the override. Keep operator-facing
-  defaults synchronized in `README.md` and `.env.example`.
-- **#71 identity and persistence:** add a small, testable policy-identity helper
-  in worker ingestion/change-detection code. It will prefer `(source_id,
-  source_external_id)` and use normalized `(title, agency, publication_date)`
-  only when a stable source identity is unavailable. Collapse a normalized batch
-  before database writes, then resolve a matching persisted entry before adding
-  a version. Update `crates/backend/src/feed.rs` to select one latest row per
-  policy identity as a defensive read-side guard.
+- **Source configuration and cleanup migrations:** add ordered, additive SQL
+  migrations under `migrations/`. One migration will repoint or disable the
+  four seeded policy sources, preserving their source IDs where possible so
+  historical references remain meaningful. A later cleanup migration will
+  delete only entries identified by the shared junk criteria, relying on the
+  existing `policy_entries -> policy_versions` cascade and deleting associated
+  ingestion audit references only when they exclusively describe junk data.
+- **Shared quality contract:** add a source-independent validation helper and
+  rejection reason type in `crates/shared/src/normalization.rs`. It will accept
+  a `NormalizedPolicyRecord` plus the configured source context and enforce
+  meaningful title/content plus a stable, item-level identity/URL. This keeps
+  US, Canada, and AI-news behavior consistent and makes rejection rules unit
+  testable without HTTP fixtures.
+- **Worker normalization boundary:** update `crates/worker/src/orchestration.rs`
+  to run the shared validator after every selected normalizer and before
+  deduplication, snapshot persistence, and change detection. Log per-source
+  rejection counts/reasons without turning a valid source run into a failure.
+- **Normalizers and feed fixtures:** retain parser-specific extraction in
+  `us_normalizer.rs`, `canada_normalizer.rs`, and `ai_news_normalizer.rs`.
+  Extend `ai_news_normalizer.rs` only where live feed formats require it (RSS,
+  Atom, relative links, date fields, and per-item identity), with XML/JSON
+  fixtures and tests proving title, article URL, date, and source are emitted.
 
-## Dependencies
+## Dependencies between issues
 
-1. #69 and #70 are independent, small changes.
-2. #71 relies on the existing normalized records, `source_external_id` unique
-   constraint, version persistence, and recency-first feed query. It should be
-   implemented after reviewing those paths, but does not depend on #69 or #70.
+1. **#75** establishes clean structured policy endpoints (or disables the
+   source), reducing bad records at the source.
+2. **#78** verifies and corrects the already-seeded news feed configuration
+   and parser behavior independently of the policy endpoints.
+3. **#76** should land after #75/#78's representative fixtures are known, so
+   the shared gate rejects landing-page/navigation records without rejecting
+   valid structured policy documents or news articles.
+4. **#77** should land after #76 defines the authoritative junk criteria; its
+   data migration then removes existing matching entries and versions without
+   reclassifying them as news. It is safe to implement before runtime rollout,
+   but should be ordered after the prevention change in the release plan.
 
 ## Key design decisions
 
-- Keep deduplication deterministic: retain the first record for an identity in
-  document order and log/count collapsed duplicates rather than emitting extra
-  versions.
-- Do not collapse genuine content revisions: after identity resolution, retain
-  the existing canonical-content hash comparison so a changed policy creates a
-  new version on its single entry.
-- Use parameterized SQL and null-safe publication-date comparison for fallback
-  matching. The feed guard should order by latest observation before choosing
-  its representative, preserving the established recency-first behavior.
-- Do not add broad cross-source identity guesses beyond the documented fallback;
-  stable source-provided identifiers remain authoritative.
+- Treat source URLs and crawl paths as data: use migrations to update
+  `sources.base_url`, `crawl_config`, and `enabled`, rather than hard-coding
+  source-specific URLs in fetcher logic.
+- Require a non-boilerplate title and an identity that is either a stable
+  external ID or an item URL distinct from the fetched/landing URL. Apply a
+  small normalized denylist for known navigation headings and reject
+  single-heading-only canonical content.
+- Validation drops bad records rather than failing the entire source; a source
+  with zero valid records remains observable through source-run counts/logs.
+- Preserve legitimate historical entries by making cleanup predicates explicit
+  (known titles plus the same structural criteria) and scoped to affected
+  policy sources/categories. Never convert policy junk to `news`.
+- Verify all four live AI feeds with deterministic fixtures and normalizer
+  tests; use source configuration changes only when a provider's actual feed
+  URL differs, and keep `source_external_id` stable to avoid duplicate entries.
