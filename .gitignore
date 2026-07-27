@@ -1,4 +1,4 @@
-# Build outputs (Rust and Node)
+# Build outputs (Rust, Node, and generated frontend assets)
 target/
 node_modules/
 frontend/dist/

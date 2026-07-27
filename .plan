@@ -1,38 +1,53 @@
-# Plan: correct seeded crawl-config field typing
+# Plan: sortable, paginated change feed
 
 ## Module structure and shared types
 
-- Add one additive SQL migration under `migrations/` (after
-  `0012_expand_ai_policy_and_news_sources.sql`). It will update only the
-  National Artificial Intelligence Initiative Office source identified by its
-  existing source attributes.
-- `crates/shared/src/crawl_config.rs` remains the shared contract: it already
-  exposes separate `start_paths`, `feed_paths`, and `sitemap_paths` fields, so
-  no Rust type, schema, or fetcher changes are required for this correction.
-- The migration will audit all rows introduced by migration 0012. Sitemap URLs
-  remain in `sitemap_paths`, genuine RSS/Atom endpoints remain in
-  `feed_paths`, and `start_paths` continue to provide the configured entry
-  document for each source.
+- **Shared contract (`crates/shared/src/change_feed.rs`)**: add a typed
+  `ChangeFeedSort` enum deserialized from a single `sort` query parameter.
+  Its four wire values are `published_desc`, `published_asc`,
+  `observed_desc`, and `observed_asc`; `published_desc` is the default.
+  `ChangeFeedQuery` continues to own pagination and filters, and exposes the
+  validated sort selection without changing the existing response paging
+  fields.
+- **Backend (`crates/backend/src/feed.rs`)**: retain the candidate,
+  deduplication, filters, `limit + 1`, capped page size, and `next_offset`
+  behavior. Select a static deterministic final ordering for each enum value:
+  publication order uses `publication_date` (nulls last), then observed time,
+  latest version id, and entry id; observation order uses observed time and
+  the same stable tie-breakers.
+- **Frontend API (`frontend/src/api/client.ts`, `hooks.ts`)**: carry the
+  shared sort wire values in the filter type and use a paginated/infinite query
+  keyed by filters plus sort. Each subsequent request supplies the API
+  `next_offset` while retaining all other query parameters.
+- **Feed UI (`ChangeFeedPage`, `FeedFilterBar`, `ChangeFeedRow`)**: parse and
+  write `sort` with the existing URL search-param filters; render the labelled
+  Sort by select; pass the active sort’s date meaning to each row; append pages
+  through a Load more control and display the aggregate loaded count.
 
-## Dependencies
+## Dependencies and delivery order
 
-1. Migration 0012 introduced the source rows and the AI.gov field mismatch.
-2. Issue #89 follows it with an additive migration; it must not edit an
-   already-shipped migration.
-3. The bounded-discovery fetcher consumes the corrected JSON configuration
-   without a code deployment dependency because its parser already supports
-   the required fields.
+1. **#91** establishes the API enum and deterministic SQL order. It is the
+   compatibility boundary for all later browser behavior.
+2. **#92** depends on #91 to expose supported values in a URL-backed control,
+   default to newest published dates, and make date labels/row dates match the
+   active order.
+3. **#93** builds on the API’s existing offset/`next_offset` contract and
+   pairs with #92 so every page request preserves both filters and `sort`.
 
 ## Key design decisions
 
-- For AI.gov, remove the incorrect RSS-specific `feed_paths` and
-  `feed_format` values and set `/sitemap.xml` in `sitemap_paths`, while
-  retaining its existing conservative bounds and filters.
-- Use a precise `UPDATE` predicate based on the source's existing identity
-  fields so unrelated editable source configuration is not changed.
-- Preserve deliberately configured start entry paths even when they point to
-  the same sitemap or feed; URL deduplication is the fetcher's responsibility.
-- Verify the remaining migration-0012 rows during implementation: DeepMind,
-  Stanford HAI, White House OSTP, Copyright Office, and Canada.ca use sitemap
-  endpoints; NVIDIA and ISED use genuine RSS endpoints. Correct an additional
-  row only if that audit finds a field/URL mismatch.
+- Use `sort` as the sole public query key and normalize missing or invalid
+  values to `published_desc`; this keeps old shared links valid and makes the
+  new default explicit.
+- Do not interpolate client input into SQL. Match the enum to fixed ORDER BY
+  clauses (or equivalent typed SQL expressions) so ordering remains safe and
+  deterministic across offset pages.
+- Reset loaded pages and pagination to offset zero whenever any filter or sort
+  changes. Store all loaded pages in query state, flatten them only for
+  rendering, and derive `hasNextPage` exclusively from `next_offset`.
+- Keep page requests at a bounded frontend page size (initially 40) while the
+  backend remains authoritative with its 100-item maximum. The displayed
+  counter is the flattened loaded-item total, not the first-page count.
+- For publication sorts, render publication date (with a clear null fallback);
+  for observation sorts, render `changed_at` and label the date column
+  accordingly so visible chronology always agrees with the selected ordering.
