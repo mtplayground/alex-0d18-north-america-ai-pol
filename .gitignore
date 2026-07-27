@@ -1,9 +1,9 @@
-# Build outputs
+# Build outputs (Rust and Node)
 target/
 node_modules/
 frontend/dist/
 
-# Local runtime and platform credentials/state
+# Local runtime, deployment credentials, and platform state
 .env.production
 .gh_token
 .database_url

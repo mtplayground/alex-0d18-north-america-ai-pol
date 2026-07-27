@@ -1,56 +1,38 @@
-# Plan: bounded, polite, config-driven source crawling
+# Plan: correct seeded crawl-config field typing
 
 ## Module structure and shared types
 
-- Add `crates/shared/src/crawl_config.rs`, exported from `lib.rs`, with a
-  deserialized `CrawlConfig` and small helpers. It owns `start_paths`, optional
-  sitemap/feed entry points, `allowed_path_prefixes`, `include_patterns`,
-  `exclude_patterns`, `max_pages`, and `max_depth`; invalid optional fields are
-  reported as configuration errors rather than silently widening a crawl.
-- Keep `Source` as the database contract and parse its JSON `crawl_config`
-  once at the worker boundary. `crates/worker/src/fetcher.rs` owns URL
-  resolution, same-host filtering, canonical URL deduplication, breadth-first
-  traversal, sitemap/RSS/Atom extraction, and the existing snapshot payload
-  fetch path.
-- Add focused fetcher tests using deterministic HTML, XML sitemap, RSS/Atom,
-  and URL-filter fixtures. Keep normalizers unchanged: every discovered
-  document continues through orchestration's existing fetch/snapshot/
-  normalize pipeline.
-- Issue #84 extends the fetcher with a host-scoped `RobotsPolicy` cache and a
-  `HostThrottle` (minimum delay plus semaphore/concurrency cap). Orchestration
-  remains responsible only for source runs and logging skipped URLs.
-- Issue #85 adds one additive migration under `migrations/`; source rows carry
-  their own conservative crawl configuration and need no code-level source
-  special cases.
+- Add one additive SQL migration under `migrations/` (after
+  `0012_expand_ai_policy_and_news_sources.sql`). It will update only the
+  National Artificial Intelligence Initiative Office source identified by its
+  existing source attributes.
+- `crates/shared/src/crawl_config.rs` remains the shared contract: it already
+  exposes separate `start_paths`, `feed_paths`, and `sitemap_paths` fields, so
+  no Rust type, schema, or fetcher changes are required for this correction.
+- The migration will audit all rows introduced by migration 0012. Sitemap URLs
+  remain in `sitemap_paths`, genuine RSS/Atom endpoints remain in
+  `feed_paths`, and `start_paths` continue to provide the configured entry
+  document for each source.
 
-## Dependencies and delivery order
+## Dependencies
 
-1. **#83** defines the shared config parser and bounded discovery queue. With
-   no discovery bounds configured, it must preserve today's start-URLs-only
-   behavior exactly.
-2. **#84** depends on #83 because robots checks, host delays, and concurrency
-   restrictions apply to URLs found by discovery. Explicit `start_paths` and
-   configured feeds stay fetchable even when robots disallows discovered paths.
-3. **#85** depends on #83's configuration vocabulary and can use feed/sitemap
-   entry points immediately; it does not require #84 for correctness, but
-   benefits from its politeness controls at runtime.
+1. Migration 0012 introduced the source rows and the AI.gov field mismatch.
+2. Issue #89 follows it with an additive migration; it must not edit an
+   already-shipped migration.
+3. The bounded-discovery fetcher consumes the corrected JSON configuration
+   without a code deployment dependency because its parser already supports
+   the required fields.
 
 ## Key design decisions
 
-- Crawl breadth-first with per-source `visited` and queued URL sets, strip URL
-  fragments, enforce the source host, and stop before either `max_pages` or
-  `max_depth` can be exceeded. A configured start URL is always eligible.
-- Treat `allowed_path_prefixes` as an allowlist for discovered pages, then
-  apply include/exclude patterns (exclude wins). Sitemap and feed URLs are
-  config-provided discovery entry points; parsed item/loc URLs follow the same
-  host, dedupe, filter, and bounds rules.
-- Cache and parse `robots.txt` per host for the crawler user agent. Failure to
-  retrieve robots is logged and handled conservatively according to an
-  explicit policy; robots only gates discovered URLs, never operator-configured
-  starts or feeds.
-- Use a small configurable/default inter-request delay and bounded per-host
-  concurrency; do not add unbounded task spawning. Preserve the existing
-  30-second request timeout and retry behavior.
-- Seed sources are additive, retain all current rows, prefer stable RSS/Atom,
-  API, and sitemap endpoints, and use conservative caps suitable for scheduled
-  ingestion.
+- For AI.gov, remove the incorrect RSS-specific `feed_paths` and
+  `feed_format` values and set `/sitemap.xml` in `sitemap_paths`, while
+  retaining its existing conservative bounds and filters.
+- Use a precise `UPDATE` predicate based on the source's existing identity
+  fields so unrelated editable source configuration is not changed.
+- Preserve deliberately configured start entry paths even when they point to
+  the same sitemap or feed; URL deduplication is the fetcher's responsibility.
+- Verify the remaining migration-0012 rows during implementation: DeepMind,
+  Stanford HAI, White House OSTP, Copyright Office, and Canada.ca use sitemap
+  endpoints; NVIDIA and ISED use genuine RSS endpoints. Correct an additional
+  row only if that audit finds a field/URL mismatch.
