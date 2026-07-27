@@ -97,7 +97,10 @@ mod e2e_tests {
         };
 
         let fetcher = SourceFetcher::new().unwrap();
-        let fetched = fetcher.fetch(&source).await.unwrap();
+        let fetched = fetcher.fetch_all(&source).await.unwrap();
+        let Some(fetched) = fetched.first() else {
+            panic!("fixture source must produce a fetched document");
+        };
         let records = UsGovernmentNormalizer
             .normalize(
                 &source,

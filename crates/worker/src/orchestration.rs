@@ -82,46 +82,54 @@ impl IngestionOrchestrator {
         &self,
         source: &Source,
     ) -> Result<SourceProcessOutcome, Box<dyn Error + Send + Sync>> {
-        let fetched = self.fetch(source).await?;
-        let normalized = self.normalize(fetched)?;
+        let fetched_documents = self.fetch(source).await?;
+        let mut source_outcome = SourceProcessOutcome::default();
 
-        let outcome = self.detect_changes(&normalized).await?;
-        self.store(&normalized, &outcome);
+        for fetched_document in fetched_documents {
+            let normalized = self.normalize(fetched_document)?;
+            let change_detection = self.detect_changes(&normalized).await?;
+            self.store(&normalized, &change_detection);
+            source_outcome.record(normalized, change_detection);
+        }
 
-        Ok(SourceProcessOutcome {
-            raw_snapshot_key: normalized.raw_snapshot_key,
-            records_processed: normalized.records.len(),
-            change_detection: outcome,
-        })
+        Ok(source_outcome)
     }
 
     async fn fetch(
         &self,
         source: &Source,
-    ) -> Result<FetchedDocument, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Vec<FetchedDocument>, Box<dyn Error + Send + Sync>> {
         println!("fetching source {} ({})", source.id, source.base_url);
-        let payload = self.fetcher.fetch(source).await?;
-        let content_hash = format!("{:x}", sha2::Sha256::digest(&payload.body));
-        let snapshot = self
-            .snapshot_storage
-            .store(
-                source.id,
-                &content_hash,
-                &payload.content_type,
-                payload.body.clone(),
-            )
-            .await?;
+        let payloads = self.fetcher.fetch_all(source).await?;
+        let mut documents = Vec::with_capacity(payloads.len());
 
-        println!("captured {} at {}", snapshot.object_key, payload.url);
-        Ok(FetchedDocument {
-            source_id: source.id,
-            source: source.clone(),
-            source_url: payload.url.to_string(),
-            content_hash,
-            content_type: payload.content_type,
-            raw_document: payload.body,
-            raw_snapshot_key: snapshot.object_key,
-        })
+        for payload in payloads {
+            let content_hash = format!("{:x}", sha2::Sha256::digest(&payload.body));
+            let source_url = payload.url.to_string();
+            let snapshot = self
+                .snapshot_storage
+                .store(
+                    source.id,
+                    &source_url,
+                    &content_hash,
+                    &payload.content_type,
+                    payload.body.clone(),
+                )
+                .await?;
+
+            println!("captured {} at {}", snapshot.object_key, source_url);
+            documents.push(FetchedDocument {
+                source_id: source.id,
+                source: source.clone(),
+                source_url,
+                content_hash,
+                content_type: payload.content_type,
+                raw_document: payload.body,
+                raw_snapshot_key: snapshot.object_key,
+            });
+        }
+
+        Ok(documents)
     }
 
     fn normalize(
@@ -191,10 +199,33 @@ impl IngestionOrchestrator {
     }
 }
 
+#[derive(Default)]
 struct SourceProcessOutcome {
     raw_snapshot_key: String,
     records_processed: usize,
     change_detection: ChangeDetectionOutcome,
+}
+
+impl SourceProcessOutcome {
+    fn record(&mut self, document: NormalizedDocument, outcome: ChangeDetectionOutcome) {
+        // A source-run row has a single audit-key column. Policy-version rows
+        // retain the exact snapshot used for each document; use the final key
+        // here as a concise pointer to this multi-path source run.
+        self.raw_snapshot_key = document.raw_snapshot_key;
+        self.records_processed = self.records_processed.saturating_add(document.records.len());
+        self.change_detection.new_entries = self
+            .change_detection
+            .new_entries
+            .saturating_add(outcome.new_entries);
+        self.change_detection.updated_entries = self
+            .change_detection
+            .updated_entries
+            .saturating_add(outcome.updated_entries);
+        self.change_detection.unchanged_entries = self
+            .change_detection
+            .unchanged_entries
+            .saturating_add(outcome.unchanged_entries);
+    }
 }
 
 #[derive(FromRow)]

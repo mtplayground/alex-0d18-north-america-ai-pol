@@ -1,12 +1,17 @@
-//! HTTP retrieval for configured government sources.
+//! HTTP retrieval for configured policy and news sources.
 
 use std::{error::Error, time::Duration};
 
 use policy_shared::Source;
-use reqwest::{header::CONTENT_TYPE, Client, StatusCode, Url};
+use reqwest::{
+    header::{ACCEPT, CONTENT_TYPE},
+    Client, StatusCode, Url,
+};
 
 const MAX_FETCH_ATTEMPTS: u8 = 3;
 const RETRY_DELAY: Duration = Duration::from_millis(250);
+const DOCUMENT_ACCEPT_HEADER: &str = "text/html, application/xhtml+xml, application/json, \
+    application/feed+json, application/rss+xml, application/atom+xml, application/xml, text/xml";
 
 /// Raw document fetched from a configured source.
 pub struct FetchedPayload {
@@ -31,13 +36,22 @@ impl SourceFetcher {
         })
     }
 
-    /// Fetches the configured start document, retrying temporary source failures.
-    pub async fn fetch(
+    /// Fetches every configured start document, retrying temporary source failures.
+    pub async fn fetch_all(
         &self,
         source: &Source,
-    ) -> Result<FetchedPayload, Box<dyn Error + Send + Sync>> {
-        let url = source_fetch_url(source)?;
+    ) -> Result<Vec<FetchedPayload>, Box<dyn Error + Send + Sync>> {
+        let urls = source_fetch_urls(source)?;
+        let mut payloads = Vec::with_capacity(urls.len());
 
+        for url in urls {
+            payloads.push(self.fetch_url(url).await?);
+        }
+
+        Ok(payloads)
+    }
+
+    async fn fetch_url(&self, url: Url) -> Result<FetchedPayload, Box<dyn Error + Send + Sync>> {
         for attempt in 1..=MAX_FETCH_ATTEMPTS {
             match self.fetch_once(url.clone()).await {
                 Ok(payload) => return Ok(payload),
@@ -61,6 +75,7 @@ impl SourceFetcher {
         let response = self
             .client
             .get(url.clone())
+            .header(ACCEPT, DOCUMENT_ACCEPT_HEADER)
             .send()
             .await
             .map_err(FetchError::Request)?;
@@ -128,17 +143,31 @@ fn is_retryable_status(status: StatusCode) -> bool {
     )
 }
 
-fn source_fetch_url(source: &Source) -> Result<Url, Box<dyn Error + Send + Sync>> {
+fn source_fetch_urls(source: &Source) -> Result<Vec<Url>, Box<dyn Error + Send + Sync>> {
     let base_url = Url::parse(&source.base_url)?;
-    let start_path = source
+    let start_paths = source
         .crawl_config
         .get("start_paths")
         .and_then(|paths| paths.as_array())
-        .and_then(|paths| paths.first())
-        .and_then(|path| path.as_str())
-        .unwrap_or("");
+        .filter(|paths| !paths.is_empty());
 
-    Ok(base_url.join(start_path)?)
+    let Some(start_paths) = start_paths else {
+        return Ok(vec![base_url]);
+    };
+
+    start_paths
+        .iter()
+        .enumerate()
+        .map(|(index, start_path)| {
+            let start_path = start_path.as_str().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("crawl_config.start_paths[{index}] must be a string"),
+                )
+            })?;
+            Ok(base_url.join(start_path)?)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -146,26 +175,48 @@ mod tests {
     use policy_shared::{Region, Source};
     use serde_json::json;
 
-    use reqwest::StatusCode;
+    use reqwest::{StatusCode, Url};
 
-    use super::{is_retryable_status, source_fetch_url};
+    use super::{is_retryable_status, source_fetch_urls, DOCUMENT_ACCEPT_HEADER};
 
     #[test]
-    fn fetch_url_uses_the_first_configured_start_path() {
+    fn fetch_urls_include_every_configured_start_path_in_order() {
         let source = Source {
             id: 1,
             region: Region::UnitedStates,
             category: policy_shared::SourceCategory::Policy,
             agency: "Example agency".to_owned(),
             base_url: "https://example.gov".to_owned(),
-            crawl_config: json!({ "start_paths": ["/policy/feed"] }),
+            crawl_config: json!({ "start_paths": ["/policy/feed", "/policy/archive"] }),
             enabled: true,
         };
 
         assert_eq!(
-            source_fetch_url(&source).unwrap().as_str(),
-            "https://example.gov/policy/feed"
+            source_fetch_urls(&source)
+                .unwrap()
+                .iter()
+                .map(Url::as_str)
+                .collect::<Vec<_>>(),
+            vec![
+                "https://example.gov/policy/feed",
+                "https://example.gov/policy/archive",
+            ]
         );
+    }
+
+    #[test]
+    fn fetch_accept_header_requests_policy_and_feed_media_types() {
+        for media_type in [
+            "text/html",
+            "application/json",
+            "application/feed+json",
+            "application/rss+xml",
+            "application/atom+xml",
+            "application/xml",
+            "text/xml",
+        ] {
+            assert!(DOCUMENT_ACCEPT_HEADER.contains(media_type));
+        }
     }
 
     #[test]
