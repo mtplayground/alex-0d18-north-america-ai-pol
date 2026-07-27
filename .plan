@@ -1,58 +1,56 @@
-# Plan: reliable policy and AI-news ingestion
+# Plan: bounded, polite, config-driven source crawling
 
-## Module structure and file organization
+## Module structure and shared types
 
-- **Source configuration and cleanup migrations:** add ordered, additive SQL
-  migrations under `migrations/`. One migration will repoint or disable the
-  four seeded policy sources, preserving their source IDs where possible so
-  historical references remain meaningful. A later cleanup migration will
-  delete only entries identified by the shared junk criteria, relying on the
-  existing `policy_entries -> policy_versions` cascade and deleting associated
-  ingestion audit references only when they exclusively describe junk data.
-- **Shared quality contract:** add a source-independent validation helper and
-  rejection reason type in `crates/shared/src/normalization.rs`. It will accept
-  a `NormalizedPolicyRecord` plus the configured source context and enforce
-  meaningful title/content plus a stable, item-level identity/URL. This keeps
-  US, Canada, and AI-news behavior consistent and makes rejection rules unit
-  testable without HTTP fixtures.
-- **Worker normalization boundary:** update `crates/worker/src/orchestration.rs`
-  to run the shared validator after every selected normalizer and before
-  deduplication, snapshot persistence, and change detection. Log per-source
-  rejection counts/reasons without turning a valid source run into a failure.
-- **Normalizers and feed fixtures:** retain parser-specific extraction in
-  `us_normalizer.rs`, `canada_normalizer.rs`, and `ai_news_normalizer.rs`.
-  Extend `ai_news_normalizer.rs` only where live feed formats require it (RSS,
-  Atom, relative links, date fields, and per-item identity), with XML/JSON
-  fixtures and tests proving title, article URL, date, and source are emitted.
+- Add `crates/shared/src/crawl_config.rs`, exported from `lib.rs`, with a
+  deserialized `CrawlConfig` and small helpers. It owns `start_paths`, optional
+  sitemap/feed entry points, `allowed_path_prefixes`, `include_patterns`,
+  `exclude_patterns`, `max_pages`, and `max_depth`; invalid optional fields are
+  reported as configuration errors rather than silently widening a crawl.
+- Keep `Source` as the database contract and parse its JSON `crawl_config`
+  once at the worker boundary. `crates/worker/src/fetcher.rs` owns URL
+  resolution, same-host filtering, canonical URL deduplication, breadth-first
+  traversal, sitemap/RSS/Atom extraction, and the existing snapshot payload
+  fetch path.
+- Add focused fetcher tests using deterministic HTML, XML sitemap, RSS/Atom,
+  and URL-filter fixtures. Keep normalizers unchanged: every discovered
+  document continues through orchestration's existing fetch/snapshot/
+  normalize pipeline.
+- Issue #84 extends the fetcher with a host-scoped `RobotsPolicy` cache and a
+  `HostThrottle` (minimum delay plus semaphore/concurrency cap). Orchestration
+  remains responsible only for source runs and logging skipped URLs.
+- Issue #85 adds one additive migration under `migrations/`; source rows carry
+  their own conservative crawl configuration and need no code-level source
+  special cases.
 
-## Dependencies between issues
+## Dependencies and delivery order
 
-1. **#75** establishes clean structured policy endpoints (or disables the
-   source), reducing bad records at the source.
-2. **#78** verifies and corrects the already-seeded news feed configuration
-   and parser behavior independently of the policy endpoints.
-3. **#76** should land after #75/#78's representative fixtures are known, so
-   the shared gate rejects landing-page/navigation records without rejecting
-   valid structured policy documents or news articles.
-4. **#77** should land after #76 defines the authoritative junk criteria; its
-   data migration then removes existing matching entries and versions without
-   reclassifying them as news. It is safe to implement before runtime rollout,
-   but should be ordered after the prevention change in the release plan.
+1. **#83** defines the shared config parser and bounded discovery queue. With
+   no discovery bounds configured, it must preserve today's start-URLs-only
+   behavior exactly.
+2. **#84** depends on #83 because robots checks, host delays, and concurrency
+   restrictions apply to URLs found by discovery. Explicit `start_paths` and
+   configured feeds stay fetchable even when robots disallows discovered paths.
+3. **#85** depends on #83's configuration vocabulary and can use feed/sitemap
+   entry points immediately; it does not require #84 for correctness, but
+   benefits from its politeness controls at runtime.
 
 ## Key design decisions
 
-- Treat source URLs and crawl paths as data: use migrations to update
-  `sources.base_url`, `crawl_config`, and `enabled`, rather than hard-coding
-  source-specific URLs in fetcher logic.
-- Require a non-boilerplate title and an identity that is either a stable
-  external ID or an item URL distinct from the fetched/landing URL. Apply a
-  small normalized denylist for known navigation headings and reject
-  single-heading-only canonical content.
-- Validation drops bad records rather than failing the entire source; a source
-  with zero valid records remains observable through source-run counts/logs.
-- Preserve legitimate historical entries by making cleanup predicates explicit
-  (known titles plus the same structural criteria) and scoped to affected
-  policy sources/categories. Never convert policy junk to `news`.
-- Verify all four live AI feeds with deterministic fixtures and normalizer
-  tests; use source configuration changes only when a provider's actual feed
-  URL differs, and keep `source_external_id` stable to avoid duplicate entries.
+- Crawl breadth-first with per-source `visited` and queued URL sets, strip URL
+  fragments, enforce the source host, and stop before either `max_pages` or
+  `max_depth` can be exceeded. A configured start URL is always eligible.
+- Treat `allowed_path_prefixes` as an allowlist for discovered pages, then
+  apply include/exclude patterns (exclude wins). Sitemap and feed URLs are
+  config-provided discovery entry points; parsed item/loc URLs follow the same
+  host, dedupe, filter, and bounds rules.
+- Cache and parse `robots.txt` per host for the crawler user agent. Failure to
+  retrieve robots is logged and handled conservatively according to an
+  explicit policy; robots only gates discovered URLs, never operator-configured
+  starts or feeds.
+- Use a small configurable/default inter-request delay and bounded per-host
+  concurrency; do not add unbounded task spawning. Preserve the existing
+  30-second request timeout and retry behavior.
+- Seed sources are additive, retain all current rows, prefer stable RSS/Atom,
+  API, and sitemap endpoints, and use conservative caps suitable for scheduled
+  ingestion.

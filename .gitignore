@@ -1,6 +1,9 @@
+# Build outputs
 target/
 node_modules/
 frontend/dist/
+
+# Local runtime and platform credentials/state
 .env.production
 .gh_token
 .database_url
