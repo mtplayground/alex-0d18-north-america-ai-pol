@@ -36,8 +36,9 @@ pub struct WorkerConfig {
     pub database_url: String,
     /// Credentials and location for raw-source object storage.
     pub object_storage: ObjectStorageConfig,
-    /// Credentials and request defaults for generated change summaries.
-    pub ai_summarizer: AiSummarizerConfig,
+    /// Credentials and request defaults for generated change summaries, when
+    /// an AI service has been configured for this deployment.
+    pub ai_summarizer: Option<AiSummarizerConfig>,
     /// Delay between ingestion passes.
     pub scheduler_cadence: Duration,
 }
@@ -91,15 +92,36 @@ pub struct AiSummarizerConfig {
 }
 
 impl AiSummarizerConfig {
-    fn from_env() -> Result<Self, ConfigError> {
-        let timeout_seconds = optional("AI_SUMMARIZER_TIMEOUT_SECONDS", "20")?.parse()?;
+    fn from_env() -> Result<Option<Self>, ConfigError> {
+        Self::from_values(
+            nonempty_env("AI_SUMMARIZER_API_KEY"),
+            nonempty_env("AI_SUMMARIZER_BASE_URL"),
+            nonempty_env("AI_SUMMARIZER_MODEL"),
+            nonempty_env("AI_SUMMARIZER_TIMEOUT_SECONDS"),
+        )
+    }
 
-        Ok(Self {
-            api_key: required("AI_SUMMARIZER_API_KEY")?,
-            base_url: required("AI_SUMMARIZER_BASE_URL")?,
-            model: required("AI_SUMMARIZER_MODEL")?,
+    fn from_values(
+        api_key: Option<String>,
+        base_url: Option<String>,
+        model: Option<String>,
+        timeout_seconds: Option<String>,
+    ) -> Result<Option<Self>, ConfigError> {
+        // Summaries enrich ingestion but must never stop the tracker from
+        // recording a source change. Treat incomplete and blank configuration
+        // as an explicitly disabled integration instead of a startup error.
+        let (Some(api_key), Some(base_url), Some(model)) = (api_key, base_url, model) else {
+            return Ok(None);
+        };
+
+        let timeout_seconds = timeout_seconds.unwrap_or_else(|| "20".to_owned()).parse()?;
+
+        Ok(Some(Self {
+            api_key,
+            base_url,
+            model,
             request_timeout: Duration::from_secs(timeout_seconds),
-        })
+        }))
     }
 }
 
@@ -152,5 +174,47 @@ fn optional(variable: &'static str, default: &'static str) -> Result<String, Con
         Ok(value) => Ok(value),
         Err(env::VarError::NotPresent) => Ok(default.to_owned()),
         Err(env::VarError::NotUnicode(_)) => Err(ConfigError::Missing(variable)),
+    }
+}
+
+fn nonempty_env(variable: &'static str) -> Option<String> {
+    env::var(variable)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AiSummarizerConfig;
+
+    #[test]
+    fn blank_or_incomplete_summarizer_configuration_is_disabled() {
+        let blank = AiSummarizerConfig::from_values(None, None, None, None);
+        assert!(matches!(blank, Ok(None)));
+
+        let incomplete = AiSummarizerConfig::from_values(
+            Some("key".to_owned()),
+            None,
+            Some("model".to_owned()),
+            None,
+        );
+        assert!(matches!(incomplete, Ok(None)));
+    }
+
+    #[test]
+    fn configured_summarizer_uses_default_timeout_when_blank() {
+        let config = AiSummarizerConfig::from_values(
+            Some("key".to_owned()),
+            Some("https://ai.example.test".to_owned()),
+            Some("model".to_owned()),
+            None,
+        );
+
+        match config {
+            Ok(Some(config)) => assert_eq!(config.request_timeout.as_secs(), 20),
+            Ok(None) => panic!("complete summarizer settings should enable summaries"),
+            Err(error) => panic!("complete summarizer settings should parse: {error}"),
+        }
     }
 }

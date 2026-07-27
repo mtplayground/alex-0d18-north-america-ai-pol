@@ -121,7 +121,8 @@ impl ChangeDetector {
         let prompt = summary_prompt(record, previous_content);
 
         match self.summarizer.summarize(&prompt).await {
-            Ok(summary) => condense_summary(&summary),
+            Ok(Some(summary)) => condense_summary(&summary),
+            Ok(None) => None,
             Err(error) => {
                 eprintln!(
                     "AI summarization failed for source record {}: {error}",
