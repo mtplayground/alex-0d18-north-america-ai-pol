@@ -180,14 +180,16 @@ h2 {
 }
 .feed-table {
   border-top: 1px solid #303438;
+  min-width: 0;
 }
 .feed-row {
   align-items: center;
   border-bottom: 1px solid #292d31;
   display: grid;
   gap: 0.75rem;
-  grid-template-columns: minmax(16rem, 1fr) 4.5rem 6rem 6.3rem 4rem;
+  grid-template-columns: minmax(0, 1fr) 4.5rem 6rem 6.3rem minmax(8.5rem, max-content);
   min-height: 3.8rem;
+  min-width: 0;
   padding: 0.55rem 1.1rem;
 }
 .feed-row:hover {
@@ -279,6 +281,7 @@ h2 {
 .source-link {
   color: #aeb4bc;
   font-size: 0.72rem;
+  white-space: nowrap;
 }
 .source-link:hover {
   color: #f3f4f6;
@@ -288,6 +291,8 @@ h2 {
   align-items: center;
   display: flex;
   gap: 0.5rem;
+  min-width: 0;
+  white-space: nowrap;
 }
 .row-actions button {
   border: 1px solid #40464d;
@@ -298,6 +303,7 @@ h2 {
   font: inherit;
   font-size: 0.68rem;
   padding: 0.2rem 0.35rem;
+  white-space: nowrap;
 }
 .row-actions button:hover {
   border-color: #77818c;
