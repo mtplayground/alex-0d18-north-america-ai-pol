@@ -1,5 +1,6 @@
 //! Reusable ingestion components used by the worker binary and integration tests.
 
+pub mod ai_news_normalizer;
 pub mod canada_normalizer;
 pub mod change_detection;
 pub mod fetcher;

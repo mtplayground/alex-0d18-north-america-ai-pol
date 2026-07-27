@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::{Region, Source};
 
-/// A source document supplied to a policy normalizer.
+/// A source document supplied to a source normalizer.
 pub struct SourceDocument<'a> {
     /// URL that produced the document.
     pub source_url: &'a str,
@@ -18,7 +18,7 @@ pub struct SourceDocument<'a> {
     pub body: &'a [u8],
 }
 
-/// A normalized policy record before persistence assigns an entry identifier.
+/// A normalized record before persistence assigns an entry identifier.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct NormalizedPolicyRecord {
     /// Stable identifier supplied by the publishing source.
@@ -39,12 +39,12 @@ pub struct NormalizedPolicyRecord {
     pub canonical_content: Value,
 }
 
-/// Common interface implemented by source-region normalizers.
+/// Common interface implemented by category- and region-specific normalizers.
 pub trait PolicyNormalizer: Send + Sync {
     /// Returns whether this normalizer can process the configured source.
     fn supports(&self, source: &Source) -> bool;
 
-    /// Parses a fetched source document into normalized policy records.
+    /// Parses a fetched source document into normalized records.
     fn normalize(
         &self,
         source: &Source,

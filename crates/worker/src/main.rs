@@ -7,7 +7,8 @@ use std::error::Error;
 
 use policy_shared::{PolicyNormalizer, WorkerConfig};
 use policy_worker::{
-    canada_normalizer, fetcher, orchestration, scheduler, storage, summarizer, us_normalizer,
+    ai_news_normalizer, canada_normalizer, fetcher, orchestration, scheduler, storage,
+    summarizer, us_normalizer,
 };
 use sqlx::postgres::PgPoolOptions;
 
@@ -22,6 +23,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let ai_summarizer = summarizer::AiSummarizer::from_config(&config.ai_summarizer)?;
     let fetcher = fetcher::SourceFetcher::new()?;
     let normalizers: Vec<Box<dyn PolicyNormalizer>> = vec![
+        Box::new(ai_news_normalizer::AiNewsNormalizer),
         Box::new(us_normalizer::UsGovernmentNormalizer),
         Box::new(canada_normalizer::CanadaGovernmentNormalizer),
     ];
