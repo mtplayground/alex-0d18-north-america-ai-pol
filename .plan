@@ -1,63 +1,40 @@
-# Architecture plan: combined AI-news and government-policy tracker
+# Plan: feed polish, cadence, and deduplication
 
-## Module boundaries and shared contracts
+## Modules and file organization
 
-- `crates/shared`: keep the cross-layer source, normalized-record, feed-query,
-  and feed-row contracts here. Add a serializable `SourceCategory` (`policy`,
-  `news`) and carry it through `Source`, normalized records, and change-feed
-  DTOs. Use a `global` origin/region value for news rather than making the
-  existing policy region model nullable.
-- `migrations`: use ordered additive SQL only. Add `sources.category` with a
-  `policy` default, extend the source-region constraint for global feeds, and
-  later seed editable news sources/configuration. Existing policy data and
-  constraints remain valid.
-- `crates/worker`: retain the fetch -> snapshot -> normalize -> detect/version
-  pipeline. Refactor fetching around one payload per configured start path;
-  content type and payload metadata travel with that payload. Register an
-  AI-news normalizer beside the US/Canada policy normalizers; it emits a record
-  for every RSS/Atom/JSON article, with GUID/ID/link as its stable external ID.
-- `crates/backend`: have feed SQL join source category and accept an optional
-  category filter while preserving existing region/agency/status filters and
-  detail behavior.
-- `frontend`: keep category in the feed page URL/filter state and React Query
-  key, render an entry-level category tag, and centralize the combined-tracker
-  terminology in the console/page components and styles.
+- **#69 UI layout:** keep the change in `frontend/src/styles.css`, alongside the
+  existing `.feed-row` and `.row-actions` rules. Preserve the five-column order;
+  give Actions an explicit no-wrap minimum width and let the title column absorb
+  remaining width. Keep the existing narrow-screen column hiding behavior.
+- **#70 worker configuration:** change the default only in
+  `crates/shared/src/config.rs` (`WorkerConfig::from_env`), retaining
+  `SCHEDULER_CADENCE_SECONDS` parsing as the override. Keep operator-facing
+  defaults synchronized in `README.md` and `.env.example`.
+- **#71 identity and persistence:** add a small, testable policy-identity helper
+  in worker ingestion/change-detection code. It will prefer `(source_id,
+  source_external_id)` and use normalized `(title, agency, publication_date)`
+  only when a stable source identity is unavailable. Collapse a normalized batch
+  before database writes, then resolve a matching persisted entry before adding
+  a version. Update `crates/backend/src/feed.rs` to select one latest row per
+  policy identity as a defensive read-side guard.
 
-## Delivery order and dependencies
+## Dependencies
 
-1. **#55** establishes `SourceCategory`, global-news origin handling, the
-   migration, and API/domain propagation. It is the foundation for the rest.
-2. **#56** refactors the worker to fetch and snapshot every configured path and
-   permits feed-oriented content types. It depends on #55's source category.
-3. **#57** consumes #56 payloads and normalizes RSS, Atom, and news JSON into
-   multiple idempotent records per source document.
-4. **#58** seeds the starter news feeds only after the category model and
-   normalizer behavior are available (#55 and #57).
-5. **#59** is orthogonal hardening: make AI summarization optional at startup,
-   retry bounded transient failures, log them, and always persist ingestion
-   results with a blank summary when necessary.
-6. **#60** exposes the category lens/tag after #55 has propagated category
-   through the feed API.
-7. **#61** replaces the remaining policy-only console copy after the combined
-   feed UI exists; it should not alter data or filter semantics.
+1. #69 and #70 are independent, small changes.
+2. #71 relies on the existing normalized records, `source_external_id` unique
+   constraint, version persistence, and recency-first feed query. It should be
+   implemented after reviewing those paths, but does not depend on #69 or #70.
 
 ## Key design decisions
 
-- News sources use `category = news` plus `region = global`; policy sources
-  remain `category = policy` with their current US/Canada semantics. This keeps
-  filtering explicit and avoids nullable region handling across SQL and UI.
-- `start_paths` are independent crawl targets, not fallbacks. A path-level
-  failure is recorded/logged without preventing other configured paths or
-  sources from being processed. Each fetched payload is snapshotted before its
-  normalizer runs.
-- Normalize feed entries with deterministic identity precedence (GUID/Atom ID,
-  then canonical article link/URL) scoped by source. Changes are still decided
-  from canonical content hashes, not fetch timestamps.
-- The summarizer is an optional, timeout-bound adapter. Configuration is valid
-  when no AI credentials are supplied; retries are bounded and cannot roll back
-  or block source ingestion/version persistence.
-- Feed category filtering composes with current filters and supports an
-  explicit all/both state. The server remains the authority for filtering;
-  client tags and copy are presentation only.
-- Preserve dense console styling and existing public-proxy behavior; no new
-  origin/CORS restrictions are introduced for the combined tracker.
+- Keep deduplication deterministic: retain the first record for an identity in
+  document order and log/count collapsed duplicates rather than emitting extra
+  versions.
+- Do not collapse genuine content revisions: after identity resolution, retain
+  the existing canonical-content hash comparison so a changed policy creates a
+  new version on its single entry.
+- Use parameterized SQL and null-safe publication-date comparison for fallback
+  matching. The feed guard should order by latest observation before choosing
+  its representative, preserving the established recency-first behavior.
+- Do not add broad cross-source identity guesses beyond the documented fallback;
+  stable source-provided identifiers remain authoritative.
