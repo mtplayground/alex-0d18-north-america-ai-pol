@@ -33,6 +33,7 @@ describe("ChangeFeedRow", () => {
 
     expect(screen.getByText("Fixture AI Policy Update")).toBeTruthy();
     expect(screen.getByText("Fixture summary of the policy change.")).toBeTruthy();
+    expect(screen.getByText("Government policy")).toBeTruthy();
     expect(screen.getByText("New")).toBeTruthy();
     expect(screen.getByRole("link", { name: /source/i })).toHaveProperty(
       "href",

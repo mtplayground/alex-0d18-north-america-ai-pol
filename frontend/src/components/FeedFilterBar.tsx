@@ -2,12 +2,13 @@ type FeedFilterBarProps = {
   region: string;
   agency: string;
   status: string;
-  onChange: (name: "region" | "agency" | "status", value: string) => void;
+  category: string;
+  onChange: (name: "region" | "agency" | "status" | "category", value: string) => void;
   onClear: () => void;
 };
 
-export function FeedFilterBar({ agency, onChange, onClear, region, status }: FeedFilterBarProps) {
-  const hasFilters = Boolean(region || agency || status);
+export function FeedFilterBar({ agency, category, onChange, onClear, region, status }: FeedFilterBarProps) {
+  const hasFilters = Boolean(region || agency || status || category);
 
   return (
     <div className="feed-filter-bar" aria-label="Filter policy changes">
@@ -17,6 +18,15 @@ export function FeedFilterBar({ agency, onChange, onClear, region, status }: Fee
           <option value="">All regions</option>
           <option value="us">United States</option>
           <option value="ca">Canada</option>
+          <option value="global">Global</option>
+        </select>
+      </label>
+      <label>
+        <span>Source type</span>
+        <select onChange={(event) => onChange("category", event.target.value)} value={category}>
+          <option value="">AI news and policy</option>
+          <option value="news">AI news</option>
+          <option value="policy">Government policy</option>
         </select>
       </label>
       <label>

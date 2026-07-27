@@ -19,6 +19,8 @@ pub struct ChangeFeedQuery {
     pub agency: Option<String>,
     /// Current policy status to include.
     pub status: Option<String>,
+    /// Source category to include, such as `policy` or `news`.
+    pub category: Option<String>,
 }
 
 impl ChangeFeedQuery {
@@ -29,11 +31,12 @@ impl ChangeFeedQuery {
     }
 
     /// Returns optional, normalized values for feed refinement.
-    pub fn filters(&self) -> (Option<String>, Option<String>, Option<String>) {
+    pub fn filters(&self) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
         (
             normalized_filter(self.region.as_deref()).map(str::to_ascii_lowercase),
             normalized_filter(self.agency.as_deref()).map(str::to_owned),
             normalized_filter(self.status.as_deref()).map(str::to_owned),
+            normalized_filter(self.category.as_deref()).map(str::to_ascii_lowercase),
         )
     }
 }
@@ -87,17 +90,23 @@ mod tests {
     }
 
     #[test]
-    fn filters_trim_empty_values_and_normalize_region() {
+    fn filters_trim_empty_values_and_normalize_codes() {
         let query = ChangeFeedQuery {
             region: Some(" CA ".to_owned()),
             agency: Some("  Health Canada  ".to_owned()),
             status: Some(" ".to_owned()),
+            category: Some(" NEWS ".to_owned()),
             ..ChangeFeedQuery::default()
         };
 
         assert_eq!(
             query.filters(),
-            (Some("ca".to_owned()), Some("Health Canada".to_owned()), None)
+            (
+                Some("ca".to_owned()),
+                Some("Health Canada".to_owned()),
+                None,
+                Some("news".to_owned()),
+            )
         );
     }
 }
