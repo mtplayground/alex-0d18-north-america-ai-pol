@@ -17,7 +17,8 @@ pub use change_feed::{ChangeFeedItem, ChangeFeedQuery, ChangeFeedResponse};
 pub use domain::{Region, SourceCategory};
 pub use entry_detail::{EntryDetail, EntryDetailResponse, EntryVersionDetail};
 pub use normalization::{
-    NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, SourceDocument,
+    validate_record_quality, NormalizationError, NormalizedPolicyRecord, PolicyNormalizer,
+    RecordQualityRejection, SourceDocument,
 };
 pub use policy_entry::PolicyEntry;
 pub use policy_version::{PolicyChangeKind, PolicyVersion};
