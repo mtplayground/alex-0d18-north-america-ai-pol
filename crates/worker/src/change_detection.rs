@@ -63,7 +63,11 @@ impl ChangeDetector {
     ) -> Result<ChangeKind, Box<dyn Error + Send + Sync>> {
         let content_hash = canonical_hash(&record.canonical_content)?;
         let mut transaction = self.database.begin().await?;
-        let entry_id = upsert_entry(&mut transaction, source_id, record).await?;
+        let matching_entry_id = find_matching_entry(&mut transaction, source_id, record).await?;
+        let entry_id = match matching_entry_id {
+            Some(entry_id) => entry_id,
+            None => upsert_entry(&mut transaction, source_id, record).await?,
+        };
         let latest = sqlx::query_as::<_, LatestVersion>(
             "SELECT canonical_content, content_hash, version_number FROM policy_versions \
              WHERE policy_entry_id = $1 ORDER BY version_number DESC LIMIT 1",
@@ -94,6 +98,9 @@ impl ChangeDetector {
             }
             None => {
                 let summary = self.summarize_change(record, None).await;
+                if matching_entry_id.is_some() {
+                    update_entry(&mut transaction, entry_id, record).await?;
+                }
                 insert_version(
                     &mut transaction,
                     entry_id,
@@ -172,6 +179,56 @@ fn condense_summary(summary: &str) -> Option<String> {
         .collect::<Vec<_>>();
 
     (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// Finds the persistent entry representing this policy before creating one.
+///
+/// A source-provided identifier is the authoritative identity within a source.
+/// When that does not resolve an existing entry, a complete title/agency/date
+/// tuple provides a conservative fallback for overlapping sources or sources
+/// that change or omit their identifiers.
+async fn find_matching_entry(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    source_id: i64,
+    record: &NormalizedPolicyRecord,
+) -> Result<Option<i64>, sqlx::Error> {
+    let by_source_external_id = sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM policy_entries WHERE source_id = $1 AND source_external_id = $2 LIMIT 1",
+    )
+    .bind(source_id)
+    .bind(&record.source_external_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+
+    if by_source_external_id.is_some() {
+        return Ok(by_source_external_id);
+    }
+
+    let Some(publication_date) = record.publication_date else {
+        return Ok(None);
+    };
+
+    if record.title.trim().is_empty() || record.agency.trim().is_empty() {
+        return Ok(None);
+    }
+
+    sqlx::query_scalar::<_, i64>(
+        "SELECT entries.id FROM policy_entries AS entries \
+         JOIN sources AS existing_source ON existing_source.id = entries.source_id \
+         JOIN sources AS incoming_source ON incoming_source.id = $4 \
+         WHERE existing_source.category = incoming_source.category \
+           AND LOWER(REGEXP_REPLACE(BTRIM(entries.title), '[[:space:]]+', ' ', 'g')) = LOWER(REGEXP_REPLACE(BTRIM($1), '[[:space:]]+', ' ', 'g')) \
+           AND LOWER(REGEXP_REPLACE(BTRIM(entries.agency), '[[:space:]]+', ' ', 'g')) = LOWER(REGEXP_REPLACE(BTRIM($2), '[[:space:]]+', ' ', 'g')) \
+           AND entries.publication_date = $3 \
+         ORDER BY entries.updated_at DESC, entries.id DESC \
+         LIMIT 1",
+    )
+    .bind(&record.title)
+    .bind(&record.agency)
+    .bind(publication_date)
+    .bind(source_id)
+    .fetch_optional(&mut **transaction)
+    .await
 }
 
 async fn upsert_entry(
