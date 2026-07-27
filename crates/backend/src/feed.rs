@@ -20,22 +20,38 @@ pub async fn list_changes(
     let (limit, offset) = query.pagination();
     let (region, agency, status, category) = query.filters();
     let rows = sqlx::query_as::<_, FeedRow>(
-        "SELECT entries.id AS entry_id, entries.title, entries.region, sources.category AS source_category, entries.agency, entries.publication_date, \
-         entries.status, entries.source_url, latest.change_summary, latest.observed_at \
-         FROM policy_entries AS entries \
-         JOIN sources ON sources.id = entries.source_id \
-         JOIN LATERAL ( \
-             SELECT id, change_summary, observed_at \
-             FROM policy_versions \
-             WHERE policy_entry_id = entries.id \
-             ORDER BY observed_at DESC, id DESC \
-             LIMIT 1 \
-         ) AS latest ON TRUE \
-         WHERE ($3::TEXT IS NULL OR entries.region = $3) \
-           AND ($4::TEXT IS NULL OR entries.agency = $4) \
-           AND ($5::TEXT IS NULL OR entries.status = $5) \
-           AND ($6::TEXT IS NULL OR sources.category = $6) \
-         ORDER BY latest.observed_at DESC, latest.id DESC \
+        "WITH candidate_rows AS ( \
+             SELECT entries.id AS entry_id, entries.title, entries.region, sources.category AS source_category, entries.agency, entries.publication_date, \
+                    entries.status, entries.source_url, latest.change_summary, latest.observed_at, latest.id AS latest_version_id, \
+                    CASE \
+                        WHEN entries.publication_date IS NOT NULL \
+                             AND BTRIM(entries.title) <> '' \
+                             AND BTRIM(entries.agency) <> '' \
+                        THEN CONCAT(sources.category, ':fallback:', LOWER(REGEXP_REPLACE(BTRIM(entries.title), '[[:space:]]+', ' ', 'g')), '|', LOWER(REGEXP_REPLACE(BTRIM(entries.agency), '[[:space:]]+', ' ', 'g')), '|', entries.publication_date::TEXT) \
+                        ELSE CONCAT('entry:', entries.id::TEXT) \
+                    END AS policy_identity \
+             FROM policy_entries AS entries \
+             JOIN sources ON sources.id = entries.source_id \
+             JOIN LATERAL ( \
+                 SELECT id, change_summary, observed_at \
+                 FROM policy_versions \
+                 WHERE policy_entry_id = entries.id \
+                 ORDER BY observed_at DESC, id DESC \
+                 LIMIT 1 \
+             ) AS latest ON TRUE \
+             WHERE ($3::TEXT IS NULL OR entries.region = $3) \
+               AND ($4::TEXT IS NULL OR entries.agency = $4) \
+               AND ($5::TEXT IS NULL OR entries.status = $5) \
+               AND ($6::TEXT IS NULL OR sources.category = $6) \
+         ), deduplicated_rows AS ( \
+             SELECT DISTINCT ON (policy_identity) \
+                    entry_id, title, region, source_category, agency, publication_date, status, source_url, change_summary, observed_at, latest_version_id \
+             FROM candidate_rows \
+             ORDER BY policy_identity, observed_at DESC, latest_version_id DESC, entry_id DESC \
+         ) \
+         SELECT entry_id, title, region, source_category, agency, publication_date, status, source_url, change_summary, observed_at \
+         FROM deduplicated_rows \
+         ORDER BY observed_at DESC, latest_version_id DESC, entry_id DESC \
          LIMIT $1 OFFSET $2",
     )
     .bind(i64::from(limit) + 1)

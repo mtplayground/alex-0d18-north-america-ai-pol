@@ -1,6 +1,6 @@
 //! Source iteration and ordered ingestion pipeline boundary.
 
-use std::error::Error;
+use std::{collections::HashSet, error::Error};
 
 use policy_shared::{
     NormalizationError, NormalizedPolicyRecord, PolicyNormalizer, Region, Source, SourceCategory,
@@ -84,9 +84,18 @@ impl IngestionOrchestrator {
     ) -> Result<SourceProcessOutcome, Box<dyn Error + Send + Sync>> {
         let fetched_documents = self.fetch(source).await?;
         let mut source_outcome = SourceProcessOutcome::default();
+        let mut deduplicator = RecordDeduplicator::default();
 
         for fetched_document in fetched_documents {
-            let normalized = self.normalize(fetched_document)?;
+            let mut normalized = self.normalize(fetched_document)?;
+            let duplicate_count =
+                deduplicator.retain_unique(normalized.source_id, &mut normalized.records);
+            if duplicate_count > 0 {
+                println!(
+                    "collapsed {duplicate_count} duplicate records from source {} before persistence",
+                    normalized.source_id
+                );
+            }
             let change_detection = self.detect_changes(&normalized).await?;
             self.store(&normalized, &change_detection);
             source_outcome.record(normalized, change_detection);
@@ -335,4 +344,140 @@ struct NormalizedDocument {
     raw_size: usize,
     raw_snapshot_key: String,
     records: Vec<NormalizedPolicyRecord>,
+}
+
+/// Collapses repeated records across all fetched documents from one source run.
+#[derive(Default)]
+struct RecordDeduplicator {
+    source_external_ids: HashSet<(i64, String)>,
+    fallback_identities: HashSet<FallbackIdentity>,
+}
+
+#[derive(Eq, Hash, PartialEq)]
+struct FallbackIdentity {
+    title: String,
+    agency: String,
+    publication_date: chrono::NaiveDate,
+}
+
+impl RecordDeduplicator {
+    /// Retains the first deterministic occurrence of every stable or fallback
+    /// identity and returns the number of records removed.
+    fn retain_unique(
+        &mut self,
+        source_id: i64,
+        records: &mut Vec<NormalizedPolicyRecord>,
+    ) -> usize {
+        let mut unique_records = Vec::with_capacity(records.len());
+        let mut duplicate_count = 0;
+
+        for record in std::mem::take(records) {
+            let source_external_id = stable_identity(source_id, &record);
+            let fallback_identity = fallback_identity(&record);
+            let repeated_external_id = source_external_id
+                .as_ref()
+                .is_some_and(|identity| self.source_external_ids.contains(identity));
+            let repeated_fallback = fallback_identity
+                .as_ref()
+                .is_some_and(|identity| self.fallback_identities.contains(identity));
+
+            if repeated_external_id || repeated_fallback {
+                duplicate_count += 1;
+                continue;
+            }
+
+            if let Some(identity) = source_external_id {
+                self.source_external_ids.insert(identity);
+            }
+            if let Some(identity) = fallback_identity {
+                self.fallback_identities.insert(identity);
+            }
+            unique_records.push(record);
+        }
+
+        *records = unique_records;
+        duplicate_count
+    }
+}
+
+fn stable_identity(source_id: i64, record: &NormalizedPolicyRecord) -> Option<(i64, String)> {
+    let external_id = record.source_external_id.trim();
+    (!external_id.is_empty()).then(|| (source_id, external_id.to_owned()))
+}
+
+fn fallback_identity(record: &NormalizedPolicyRecord) -> Option<FallbackIdentity> {
+    let title = normalized_identity_component(&record.title);
+    let agency = normalized_identity_component(&record.agency);
+
+    match (title.is_empty(), agency.is_empty(), record.publication_date) {
+        (false, false, Some(publication_date)) => Some(FallbackIdentity {
+            title,
+            agency,
+            publication_date,
+        }),
+        _ => None,
+    }
+}
+
+fn normalized_identity_component(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::NaiveDate;
+    use policy_shared::{NormalizedPolicyRecord, Region};
+    use serde_json::json;
+
+    use super::RecordDeduplicator;
+
+    fn record(
+        external_id: &str,
+        title: &str,
+        publication_date: Option<NaiveDate>,
+    ) -> NormalizedPolicyRecord {
+        NormalizedPolicyRecord {
+            source_external_id: external_id.to_owned(),
+            title: title.to_owned(),
+            region: Region::UnitedStates,
+            agency: "Example Agency".to_owned(),
+            publication_date,
+            status: "active".to_owned(),
+            source_url: format!("https://example.test/{external_id}"),
+            canonical_content: json!({ "external_id": external_id }),
+        }
+    }
+
+    #[test]
+    fn collapses_repeated_source_external_ids_across_documents() {
+        let mut deduplicator = RecordDeduplicator::default();
+        let mut first_document = vec![record("policy-1", "Example policy", None)];
+        let mut second_document = vec![record("policy-1", "Example policy", None)];
+
+        assert_eq!(deduplicator.retain_unique(1, &mut first_document), 0);
+        assert_eq!(deduplicator.retain_unique(1, &mut second_document), 1);
+        assert_eq!(first_document.len(), 1);
+        assert!(second_document.is_empty());
+    }
+
+    #[test]
+    fn falls_back_to_title_agency_and_publication_date() {
+        let publication_date = match NaiveDate::from_ymd_opt(2026, 7, 27) {
+            Some(publication_date) => publication_date,
+            None => panic!("valid date should construct"),
+        };
+        let mut deduplicator = RecordDeduplicator::default();
+        let mut records = vec![
+            record("policy-1", "  Example   policy ", Some(publication_date)),
+            record("policy-2", "example policy", Some(publication_date)),
+        ];
+
+        assert_eq!(deduplicator.retain_unique(1, &mut records), 1);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_external_id, "policy-1");
+    }
 }
