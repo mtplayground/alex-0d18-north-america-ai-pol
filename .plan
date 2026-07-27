@@ -1,101 +1,63 @@
-# Architecture plan
+# Architecture plan: combined AI-news and government-policy tracker
 
-## Repository layout
+## Module boundaries and shared contracts
 
-Use a Cargo workspace plus an independently managed frontend:
+- `crates/shared`: keep the cross-layer source, normalized-record, feed-query,
+  and feed-row contracts here. Add a serializable `SourceCategory` (`policy`,
+  `news`) and carry it through `Source`, normalized records, and change-feed
+  DTOs. Use a `global` origin/region value for news rather than making the
+  existing policy region model nullable.
+- `migrations`: use ordered additive SQL only. Add `sources.category` with a
+  `policy` default, extend the source-region constraint for global feeds, and
+  later seed editable news sources/configuration. Existing policy data and
+  constraints remain valid.
+- `crates/worker`: retain the fetch -> snapshot -> normalize -> detect/version
+  pipeline. Refactor fetching around one payload per configured start path;
+  content type and payload metadata travel with that payload. Register an
+  AI-news normalizer beside the US/Canada policy normalizers; it emits a record
+  for every RSS/Atom/JSON article, with GUID/ID/link as its stable external ID.
+- `crates/backend`: have feed SQL join source category and accept an optional
+  category filter while preserving existing region/agency/status filters and
+  detail behavior.
+- `frontend`: keep category in the feed page URL/filter state and React Query
+  key, render an entry-level category tag, and centralize the combined-tracker
+  terminology in the console/page components and styles.
 
-```text
-.
-├── Cargo.toml                    # workspace: backend, worker, shared
-├── crates/
-│   ├── backend/                  # Axum HTTP server and static-file hosting
-│   │   └── src/{api,config,db,services}/
-│   ├── worker/                   # scheduled ingestion executable
-│   │   └── src/{config,jobs}/
-│   └── shared/                   # domain types, config primitives, contracts
-│       └── src/{domain,normalization}/
-├── frontend/                     # React, TypeScript, Tailwind, React Query
-│   └── src/{api,components,pages,theme}/
-├── migrations/                   # ordered sqlx PostgreSQL migrations
-├── scripts/                      # local run/build/deployment helpers
-├── tests/{fixtures,e2e}/          # ingestion fixtures and end-to-end coverage
-└── docs/                         # operator documentation
-```
+## Delivery order and dependencies
 
-Keep database and infrastructure adapters in the backend/worker crates, while
-`shared` contains no HTTP, SQL, storage, or vendor-client dependency. The
-frontend consumes explicit JSON DTOs owned by the backend API rather than Rust
-internal structs directly.
+1. **#55** establishes `SourceCategory`, global-news origin handling, the
+   migration, and API/domain propagation. It is the foundation for the rest.
+2. **#56** refactors the worker to fetch and snapshot every configured path and
+   permits feed-oriented content types. It depends on #55's source category.
+3. **#57** consumes #56 payloads and normalizes RSS, Atom, and news JSON into
+   multiple idempotent records per source document.
+4. **#58** seeds the starter news feeds only after the category model and
+   normalizer behavior are available (#55 and #57).
+5. **#59** is orthogonal hardening: make AI summarization optional at startup,
+   retry bounded transient failures, log them, and always persist ingestion
+   results with a blank summary when necessary.
+6. **#60** exposes the category lens/tag after #55 has propagated category
+   through the feed API.
+7. **#61** replaces the remaining policy-only console copy after the combined
+   feed UI exists; it should not alter data or filter semantics.
 
-## Core data and contracts
+## Key design decisions
 
-PostgreSQL is the system of record:
-
-- `sources`: tracked source configuration (`region`, `agency`, base URL, crawl
-  configuration, enabled state).
-- `policy_entries`: the current normalized identity/state of a policy item,
-  uniquely scoped to source; indexed for latest-change ordering and
-  region/agency/status filters.
-- `policy_versions`: immutable observed versions with change kind (`new` or
-  `updated`), normalized-content hash, observed timestamp, summary, and raw
-  snapshot object key/reference.
-
-The canonical normalization boundary is a `NormalizedPolicyRecord` with title,
-region, agency, effective/publication date, status, source URL, stable external
-identifier, and a deterministic canonical-content representation/hash.
-Source-specific normalizers implement one common interface. Change detection
-compares the canonical content/hash with the latest version and writes a new
-version only for new or updated records.
-
-Raw fetched bytes are stored in object storage first, under deterministic,
-partitioned keys (source/date/content hash); the version row stores the key and
-content metadata. A failed snapshot, fetch, normalization, or summary is
-recorded per source/run without halting other sources.
-
-Public API contracts:
-
-- `GET /health`: deploy readiness/status.
-- `GET /api/entries`: cursor-paginated, reverse-chronological change feed;
-  optional `region`, `agency`, and `status` filters.
-- `GET /api/entries/:id`: entry metadata, versions, and summaries, shaped for
-  the expandable panel and a later full-diff view.
-
-The worker orchestrates `fetch -> snapshot -> normalize -> detect/version ->
-summarize` for each enabled source. The summarizer is a fallible, timeout-bound
-interface; an unavailable AI service never prevents the version write and can
-yield a null/fallback summary. Scheduler cadence is configuration-driven.
-
-## Delivery dependencies
-
-1. Foundation: #1 workspace layout, then #2 tooling, #3 sqlx/migrations, and
-   #4 environment configuration; #5 uses all of these to provide a running
-   server and static frontend deployment.
-2. Data and ingestion: #6 sources -> #7 entries -> #8 versions; #9 attaches
-   snapshot storage to versions; #10 scheduler -> #11 fetch/snapshot -> #12
-   and #13 normalizers -> #14 change detection. #15 summarizer -> #16 stored
-   change summaries. #26 hardens this whole pipeline.
-3. API: #17 feed endpoint depends on persisted versions/summaries; #18 adds
-   filters; #19 exposes entry detail/history.
-4. UI: #20 scaffold/client/theme -> #21 feed -> #22 filters and #23 detail ->
-   #24 local last-seen highlighting.
-5. Assurance and operations: #25 exercises the end-to-end path after the
-   ingestion, API, and UI layers; #27 documents and prepares the bare deploy
-   after the foundation is usable.
-
-## Key decisions
-
-- Use `sqlx` migrations and compile-time-safe query patterns where practical;
-  all database access is behind repository/service boundaries.
-- Use a stable source external ID plus source ID for idempotency, and a
-  canonical-content hash for change classification; avoid treating fetch time
-  as a substantive change.
-- Separate domain records, persistence models, and API DTOs so migrations and
-  UI needs can evolve independently.
-- Serve the built frontend through Axum in the bare deployment. Preserve proxy
-  semantics: derive public host/protocol from forwarded headers, and do not
-  reject own-origin browser static assets based on the rewritten internal Host.
-- Keep anonymous last-seen state in browser local storage; it is a presentation
-  feature and does not alter feed ordering or server-side records.
-- Make E2E tests deterministic with fixture HTTP responses, isolated database
-  state, fake object storage/summarizer adapters, and assertions from ingestion
-  through rendered feed output.
+- News sources use `category = news` plus `region = global`; policy sources
+  remain `category = policy` with their current US/Canada semantics. This keeps
+  filtering explicit and avoids nullable region handling across SQL and UI.
+- `start_paths` are independent crawl targets, not fallbacks. A path-level
+  failure is recorded/logged without preventing other configured paths or
+  sources from being processed. Each fetched payload is snapshotted before its
+  normalizer runs.
+- Normalize feed entries with deterministic identity precedence (GUID/Atom ID,
+  then canonical article link/URL) scoped by source. Changes are still decided
+  from canonical content hashes, not fetch timestamps.
+- The summarizer is an optional, timeout-bound adapter. Configuration is valid
+  when no AI credentials are supplied; retries are bounded and cannot roll back
+  or block source ingestion/version persistence.
+- Feed category filtering composes with current filters and supports an
+  explicit all/both state. The server remains the authority for filtering;
+  client tags and copy are presentation only.
+- Preserve dense console styling and existing public-proxy behavior; no new
+  origin/CORS restrictions are introduced for the combined tracker.
