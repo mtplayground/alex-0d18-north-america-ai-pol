@@ -1,11 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { getChangeFeed, getEntryDetail, type ChangeFeedFilters } from "./client";
 
-export function useChangeFeed(filters: ChangeFeedFilters = {}) {
-  return useQuery({
+export function useChangeFeed(filters: Omit<ChangeFeedFilters, "offset"> = {}) {
+  return useInfiniteQuery({
     queryKey: ["change-feed", filters],
-    queryFn: () => getChangeFeed(filters),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => getChangeFeed({ ...filters, offset: pageParam }),
+    getNextPageParam: (lastPage) => lastPage.next_offset ?? undefined,
   });
 }
 

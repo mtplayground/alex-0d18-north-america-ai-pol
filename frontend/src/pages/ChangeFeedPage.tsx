@@ -17,7 +17,15 @@ export function ChangeFeedPage() {
   const sort = isChangeFeedSort(sortParam) ? sortParam : DEFAULT_CHANGE_FEED_SORT;
   const sortsByPublicationDate = sort === "published_desc" || sort === "published_asc";
   const lastVisit = useLastVisit();
-  const { data, error, isPending } = useChangeFeed({
+  const {
+    data,
+    error,
+    fetchNextPage,
+    hasNextPage,
+    isFetchNextPageError,
+    isFetchingNextPage,
+    isPending,
+  } = useChangeFeed({
     limit: 40,
     sort,
     ...(region && { region }),
@@ -25,6 +33,7 @@ export function ChangeFeedPage() {
     ...(status && { status }),
     ...(category && { category }),
   });
+  const items = data?.pages.flatMap((page) => page.items) ?? [];
 
   const updateFilter = (
     name: "region" | "agency" | "status" | "category" | "sort",
@@ -40,8 +49,7 @@ export function ChangeFeedPage() {
   };
 
   const clearFilters = () => setSearchParams({}, { replace: true });
-  const newlyChangedCount =
-    data?.items.filter((item) => changedSince(item.changed_at, lastVisit)).length ?? 0;
+  const newlyChangedCount = items.filter((item) => changedSince(item.changed_at, lastVisit)).length;
 
   return (
     <section className="console-panel" aria-labelledby="feed-title">
@@ -57,7 +65,7 @@ export function ChangeFeedPage() {
         </div>
         <span className="result-count">
           {data
-            ? `${data.items.length} shown${newlyChangedCount ? ` · ${newlyChangedCount} new` : ""}`
+            ? `${items.length} shown${newlyChangedCount ? ` · ${newlyChangedCount} new` : ""}`
             : "Loading"}
         </span>
       </div>
@@ -71,9 +79,9 @@ export function ChangeFeedPage() {
         status={status}
       />
       {isPending && <p className="empty-state">Loading policy changes…</p>}
-      {error && <p className="empty-state is-error">Unable to load the change feed.</p>}
-      {data && data.items.length === 0 && <p className="empty-state">No policy changes yet.</p>}
-      {data && data.items.length > 0 && (
+      {error && !data && <p className="empty-state is-error">Unable to load the change feed.</p>}
+      {data && items.length === 0 && <p className="empty-state">No policy changes yet.</p>}
+      {data && items.length > 0 && (
         <div className="feed-table" role="table" aria-label="Latest policy changes">
           <div className="feed-row feed-row-header" role="row">
             <span role="columnheader">Policy and what changed</span>
@@ -82,7 +90,7 @@ export function ChangeFeedPage() {
             <span role="columnheader">{sortsByPublicationDate ? "Published" : "Observed"}</span>
             <span role="columnheader">Actions</span>
           </div>
-          {data.items.map((item) => (
+          {items.map((item) => (
             <ChangeFeedRow
               isNewSinceLastVisit={changedSince(item.changed_at, lastVisit)}
               item={item}
@@ -90,6 +98,14 @@ export function ChangeFeedPage() {
               dateKind={sortsByPublicationDate ? "publication" : "observation"}
             />
           ))}
+        </div>
+      )}
+      {isFetchNextPageError && <p className="empty-state is-error">Unable to load more changes.</p>}
+      {hasNextPage && (
+        <div className="feed-pagination">
+          <button disabled={isFetchingNextPage} onClick={() => fetchNextPage()} type="button">
+            {isFetchingNextPage ? "Loading more…" : "Load more"}
+          </button>
         </div>
       )}
     </section>
