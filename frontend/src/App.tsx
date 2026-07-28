@@ -1,4 +1,4 @@
-import { Link, NavLink, Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
+import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 
 import { useEntryDetail } from "./api/hooks";
 import { StatusTag } from "./components/StatusTag";
@@ -8,17 +8,6 @@ import { ChangeFeedPage } from "./pages/ChangeFeedPage";
 function AppShell() {
   return (
     <div className="console-shell">
-      <aside className="console-sidebar">
-        <Link className="product-mark" to="/">
-          AI news + policy
-        </Link>
-        <nav aria-label="Primary navigation">
-          <NavLink end to="/">
-            Change feed
-          </NavLink>
-        </nav>
-        <p className="sidebar-note">Global AI news and policy monitoring</p>
-      </aside>
       <main className="console-main">
         <header className="console-header">
           <div>
