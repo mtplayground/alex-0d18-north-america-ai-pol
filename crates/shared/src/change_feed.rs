@@ -48,7 +48,14 @@ impl ChangeFeedQuery {
     }
 
     /// Returns optional, normalized values for feed refinement.
-    pub fn filters(&self) -> (Option<String>, Option<String>, Option<String>, Option<String>) {
+    pub fn filters(
+        &self,
+    ) -> (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) {
         (
             normalized_filter(self.region.as_deref()).map(str::to_ascii_lowercase),
             normalized_filter(self.agency.as_deref()).map(str::to_owned),
@@ -78,6 +85,8 @@ pub struct ChangeFeedItem {
     pub source_category: String,
     pub agency: String,
     pub publication_date: Option<NaiveDate>,
+    /// True when the publication date is after the current date.
+    pub scheduled: bool,
     pub status: String,
     pub source_url: String,
     pub change_summary: Option<String>,
@@ -95,9 +104,10 @@ pub struct ChangeFeedResponse {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, NaiveDate, Utc};
     use serde_json::json;
 
-    use super::{ChangeFeedQuery, ChangeFeedSort};
+    use super::{ChangeFeedItem, ChangeFeedQuery, ChangeFeedSort};
 
     #[test]
     fn pagination_uses_defaults_and_bounds_the_limit() {
@@ -136,7 +146,10 @@ mod tests {
 
     #[test]
     fn sort_defaults_to_newest_published_and_accepts_each_wire_value() {
-        assert_eq!(ChangeFeedQuery::default().sort(), ChangeFeedSort::PublishedDesc);
+        assert_eq!(
+            ChangeFeedQuery::default().sort(),
+            ChangeFeedSort::PublishedDesc
+        );
 
         for (wire_value, expected) in [
             ("published_desc", ChangeFeedSort::PublishedDesc),
@@ -149,5 +162,27 @@ mod tests {
 
             assert_eq!(query.sort(), expected);
         }
+    }
+
+    #[test]
+    fn change_feed_item_serializes_scheduled_state() {
+        let changed_at = DateTime::<Utc>::from_timestamp(0, 0).expect("valid Unix timestamp");
+        let publication_date = NaiveDate::from_ymd_opt(2026, 7, 30).expect("valid date");
+        let item = ChangeFeedItem {
+            entry_id: 12,
+            title: "Scheduled item".to_owned(),
+            region: "us".to_owned(),
+            source_category: "policy".to_owned(),
+            agency: "Example agency".to_owned(),
+            publication_date: Some(publication_date),
+            scheduled: true,
+            status: "published".to_owned(),
+            source_url: "https://example.test/scheduled".to_owned(),
+            change_summary: None,
+            changed_at,
+        };
+
+        let value = serde_json::to_value(item).expect("feed item serializes");
+        assert_eq!(value["scheduled"], true);
     }
 }
