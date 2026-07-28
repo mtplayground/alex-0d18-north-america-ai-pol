@@ -14,6 +14,7 @@ export function isChangeFeedSort(value: string | null): value is ChangeFeedSort 
 }
 
 export type ChangeFeedFilters = {
+  q?: string;
   region?: string;
   agency?: string;
   status?: string;
