@@ -36,6 +36,8 @@ pub struct ChangeFeedQuery {
     pub status: Option<String>,
     /// Source category to include, such as `policy` or `news`.
     pub category: Option<String>,
+    /// Free-text term matched against entry titles and change summaries.
+    pub q: Option<String>,
     /// Ordering of items in the response. Missing values use newest publication first.
     pub sort: Option<ChangeFeedSort>,
 }
@@ -62,6 +64,14 @@ impl ChangeFeedQuery {
             normalized_filter(self.status.as_deref()).map(str::to_owned),
             normalized_filter(self.category.as_deref()).map(str::to_ascii_lowercase),
         )
+    }
+
+    /// Returns an optional trimmed free-text search term.
+    ///
+    /// Blank and absent values intentionally behave the same so clients can
+    /// keep an empty search field in their URL without changing the feed.
+    pub fn search_term(&self) -> Option<String> {
+        normalized_filter(self.q.as_deref()).map(str::to_owned)
     }
 
     /// Returns the requested feed order, defaulting to newest publication first.
@@ -142,6 +152,23 @@ mod tests {
                 Some("news".to_owned()),
             )
         );
+    }
+
+    #[test]
+    fn search_term_trims_values_and_ignores_blank_queries() {
+        assert_eq!(ChangeFeedQuery::default().search_term(), None);
+
+        let blank = ChangeFeedQuery {
+            q: Some("  \t ".to_owned()),
+            ..ChangeFeedQuery::default()
+        };
+        assert_eq!(blank.search_term(), None);
+
+        let query = ChangeFeedQuery {
+            q: Some("  artificial intelligence  ".to_owned()),
+            ..ChangeFeedQuery::default()
+        };
+        assert_eq!(query.search_term(), Some("artificial intelligence".to_owned()));
     }
 
     #[test]
