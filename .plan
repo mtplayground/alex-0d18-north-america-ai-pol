@@ -1,26 +1,39 @@
-# Console layout simplification plan
+# Change-feed text search plan
 
-## Architecture
+## Module structure
 
-- `frontend/src/App.tsx` owns the shared console shell and nests the existing
-  feed and entry-detail routes inside it. Its main header is the remaining
-  product/console context after the sidebar is removed.
-- `frontend/src/styles.css` defines the shell grid, main content spacing, and
-  responsive layout. The sidebar selectors are isolated to the removed
-  `<aside className="console-sidebar">` subtree.
+- `crates/shared/src/change_feed.rs` remains the shared HTTP query contract. Add
+  an optional `q` field and a normalization helper so blank, whitespace-only,
+  and absent values are all represented as no search.
+- `crates/backend/src/feed.rs` consumes that normalized value and adds a
+  parameterized, case-insensitive title-or-change-summary predicate to the
+  existing candidate query. The existing filters remain ANDed together, while
+  the title/summary match is grouped as one OR condition.
+- `frontend/src/api/client.ts` owns the `ChangeFeedFilters` wire type and query
+  serialization; it gains optional `q` support. `frontend/src/api/hooks.ts`
+  continues to use the complete filter object as the query key.
+- `frontend/src/pages/ChangeFeedPage.tsx` owns the URL-backed `q` state and
+  passes it through to the query hook. `frontend/src/components/FeedFilterBar.tsx`
+  owns the dense search input and its debounced change callback.
 
 ## Issue dependency
 
-- Issue #101 is self-contained and builds on the current console UI. It does
-  not change API contracts, feed data, routing, or persistence.
+1. Issue #103 first: define `q` in the shared DTO, normalize it, bind it in
+   SQL, and cover blank/absent plus title and summary matching behavior without
+   altering sort, limit/offset, or `next_offset` semantics.
+2. Issue #104 then: add the debounced search box, keep `q` in the browser URL,
+   include it in client requests/query identity and clear/reset behavior, and
+   preserve paging/count behavior for the filtered result set.
 
-## Design decisions
+## Key design decisions
 
-- Remove the sidebar DOM entirely rather than visually hiding it, eliminating
-  unused navigation and preventing an empty accessibility landmark.
-- Change `.console-shell` to one `minmax(0, 1fr)` column and delete the unused
-  sidebar/product-mark/sidebar-note styles so no reserved gutter remains.
-- Preserve `AppShell` as the route layout, keep `console-main` and its header
-  unchanged, and retain the mobile rules that still apply to feed content.
-- Validate with frontend typecheck, tests, production build, and a focused UI
-  check that the feed occupies the full viewport width with the header intact.
+- Use `q` as the one wire name across API, URL parameters, and TypeScript
+  filters to avoid mapping drift.
+- Trim only to detect an empty search; pass a normal query as a bound value and
+  use PostgreSQL case-insensitive matching against `entries.title` and
+  `latest.change_summary` with `COALESCE` for nullable summaries.
+- Keep search conjunctive with region, agency, status, and category; do not
+  change deduplication or pagination.
+- Debounce only the UI update that writes `q` to URL state. The URL remains the
+  durable source of truth, making searches reload-safe and shareable while the
+  React Query key naturally resets pagination when the committed term changes.
