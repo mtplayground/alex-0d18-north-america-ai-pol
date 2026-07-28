@@ -50,21 +50,23 @@ pub async fn list_changes(
              FROM candidate_rows \
              ORDER BY policy_identity, observed_at DESC, latest_version_id DESC, entry_id DESC \
          ) \
-         SELECT entry_id, title, region, source_category, agency, publication_date, status, source_url, change_summary, observed_at \
+         SELECT entry_id, title, region, source_category, agency, publication_date, \
+                COALESCE(publication_date > CURRENT_DATE, FALSE) AS scheduled, \
+                status, source_url, change_summary, observed_at \
          FROM deduplicated_rows \
          ORDER BY {order_by} \
          LIMIT $1 OFFSET $2"
     );
     let rows = sqlx::query_as::<_, FeedRow>(&sql)
-    .bind(i64::from(limit) + 1)
-    .bind(i64::from(offset))
-    .bind(region)
-    .bind(agency)
-    .bind(status)
-    .bind(category)
-    .fetch_all(&database.pool)
-    .await
-    .map_err(FeedError::Database)?;
+        .bind(i64::from(limit) + 1)
+        .bind(i64::from(offset))
+        .bind(region)
+        .bind(agency)
+        .bind(status)
+        .bind(category)
+        .fetch_all(&database.pool)
+        .await
+        .map_err(FeedError::Database)?;
 
     let has_next_page = rows.len() > usize::try_from(limit).expect("u32 fits in usize");
     let items = rows
@@ -88,7 +90,7 @@ pub async fn list_changes(
 const fn order_by(sort: ChangeFeedSort) -> &'static str {
     match sort {
         ChangeFeedSort::PublishedDesc => {
-            "publication_date DESC NULLS LAST, observed_at DESC, latest_version_id DESC, entry_id DESC"
+            "CASE WHEN publication_date > CURRENT_DATE THEN 1 ELSE 0 END ASC, publication_date DESC NULLS LAST, observed_at DESC, latest_version_id DESC, entry_id DESC"
         }
         ChangeFeedSort::PublishedAsc => {
             "publication_date ASC NULLS LAST, observed_at DESC, latest_version_id DESC, entry_id DESC"
@@ -106,6 +108,7 @@ struct FeedRow {
     source_category: String,
     agency: String,
     publication_date: Option<NaiveDate>,
+    scheduled: bool,
     status: String,
     source_url: String,
     change_summary: Option<String>,
@@ -121,6 +124,7 @@ impl FeedRow {
             source_category: self.source_category,
             agency: self.agency,
             publication_date: self.publication_date,
+            scheduled: self.scheduled,
             status: self.status,
             source_url: self.source_url,
             change_summary: self.change_summary,
@@ -153,10 +157,10 @@ mod tests {
     use super::order_by;
 
     #[test]
-    fn sort_orders_are_stable_and_keep_unknown_publication_dates_last() {
+    fn default_sort_deprioritizes_scheduled_entries_and_keeps_other_orders_unchanged() {
         assert_eq!(
             order_by(ChangeFeedSort::PublishedDesc),
-            "publication_date DESC NULLS LAST, observed_at DESC, latest_version_id DESC, entry_id DESC"
+            "CASE WHEN publication_date > CURRENT_DATE THEN 1 ELSE 0 END ASC, publication_date DESC NULLS LAST, observed_at DESC, latest_version_id DESC, entry_id DESC"
         );
         assert_eq!(
             order_by(ChangeFeedSort::PublishedAsc),
