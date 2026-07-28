@@ -289,6 +289,19 @@ h2 {
   border-color: #65558c;
   color: #d4c6fa;
 }
+.scheduled-tag {
+  background: #463619;
+  border: 1px solid #806329;
+  border-radius: 999px;
+  color: #e8c96e;
+  flex: none;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.3rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
 .policy-cell small,
 .region-cell,
 .feed-row time {

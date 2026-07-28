@@ -5,6 +5,7 @@ import { useEntryDetail } from "../api/hooks";
 import { formatDate } from "../formatters";
 
 import { EntryDetailPanel } from "./EntryDetailPanel";
+import { ScheduledTag } from "./ScheduledTag";
 import { SourceCategoryTag } from "./SourceCategoryTag";
 import { StatusTag } from "./StatusTag";
 
@@ -34,6 +35,7 @@ export function ChangeFeedRow({
           <span className="policy-title-line">
             <strong>{item.title}</strong>
             <SourceCategoryTag category={item.source_category} />
+            {item.scheduled && <ScheduledTag />}
             {isNewSinceLastVisit && <span className="new-marker">New</span>}
           </span>
           <small>{item.agency}</small>
