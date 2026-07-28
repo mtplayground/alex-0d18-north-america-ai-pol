@@ -33,7 +33,13 @@ describe("useChangeFeed", () => {
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
     const { result } = renderHook(
-      () => useChangeFeed({ limit: 40, region: "ca", sort: "observed_asc" }),
+      () =>
+        useChangeFeed({
+          limit: 40,
+          q: "artificial intelligence",
+          region: "ca",
+          sort: "observed_asc",
+        }),
       { wrapper },
     );
 
@@ -46,6 +52,7 @@ describe("useChangeFeed", () => {
     expect(firstRequest.searchParams.get("offset")).toBe("0");
     expect(secondRequest.searchParams.get("offset")).toBe("40");
     expect(secondRequest.searchParams.get("limit")).toBe("40");
+    expect(secondRequest.searchParams.get("q")).toBe("artificial intelligence");
     expect(secondRequest.searchParams.get("region")).toBe("ca");
     expect(secondRequest.searchParams.get("sort")).toBe("observed_asc");
   });

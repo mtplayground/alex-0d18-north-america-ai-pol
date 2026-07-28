@@ -1,12 +1,20 @@
+import { useEffect, useState } from "react";
+
 import { DEFAULT_CHANGE_FEED_SORT, type ChangeFeedSort } from "../api/client";
+
+const SEARCH_DEBOUNCE_MS = 300;
 
 type FeedFilterBarProps = {
   region: string;
+  q: string;
   agency: string;
   status: string;
   category: string;
   sort: ChangeFeedSort;
-  onChange: (name: "region" | "agency" | "status" | "category" | "sort", value: string) => void;
+  onChange: (
+    name: "q" | "region" | "agency" | "status" | "category" | "sort",
+    value: string,
+  ) => void;
   onClear: () => void;
 };
 
@@ -15,16 +23,48 @@ export function FeedFilterBar({
   category,
   onChange,
   onClear,
+  q,
   region,
   sort,
   status,
 }: FeedFilterBarProps) {
+  const [searchInput, setSearchInput] = useState(q);
+
+  useEffect(() => {
+    setSearchInput(q);
+  }, [q]);
+
+  useEffect(() => {
+    if (searchInput.trim() === q) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      onChange("q", searchInput.trim());
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [onChange, q, searchInput]);
+
   const hasFilters = Boolean(
-    region || agency || status || category || sort !== DEFAULT_CHANGE_FEED_SORT,
+    searchInput || region || agency || status || category || sort !== DEFAULT_CHANGE_FEED_SORT,
   );
+
+  const clearFilters = () => {
+    setSearchInput("");
+    onClear();
+  };
 
   return (
     <div className="feed-filter-bar" aria-label="Filter policy changes">
+      <label>
+        <span>Search changes</span>
+        <input
+          aria-label="Search policy changes"
+          onChange={(event) => setSearchInput(event.target.value)}
+          placeholder="Titles or summaries"
+          type="search"
+          value={searchInput}
+        />
+      </label>
       <label>
         <span>Sort by</span>
         <select onChange={(event) => onChange("sort", event.target.value)} value={sort}>
@@ -76,7 +116,7 @@ export function FeedFilterBar({
           <option value="expired" />
         </datalist>
       </label>
-      <button disabled={!hasFilters} onClick={onClear} type="button">
+      <button disabled={!hasFilters} onClick={clearFilters} type="button">
         Clear filters
       </button>
     </div>

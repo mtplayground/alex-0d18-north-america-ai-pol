@@ -8,6 +8,7 @@ import { changedSince, useLastVisit } from "../lastVisit";
 
 export function ChangeFeedPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const q = searchParams.get("q") ?? "";
   const region = searchParams.get("region") ?? "";
   const agency = searchParams.get("agency") ?? "";
   const status = searchParams.get("status") ?? "";
@@ -28,6 +29,7 @@ export function ChangeFeedPage() {
   } = useChangeFeed({
     limit: 40,
     sort,
+    ...(q && { q }),
     ...(region && { region }),
     ...(agency && { agency }),
     ...(status && { status }),
@@ -36,7 +38,7 @@ export function ChangeFeedPage() {
   const items = data?.pages.flatMap((page) => page.items) ?? [];
 
   const updateFilter = (
-    name: "region" | "agency" | "status" | "category" | "sort",
+    name: "q" | "region" | "agency" | "status" | "category" | "sort",
     value: string,
   ) => {
     const next = new URLSearchParams(searchParams);
@@ -74,6 +76,7 @@ export function ChangeFeedPage() {
         category={category}
         onChange={updateFilter}
         onClear={clearFilters}
+        q={q}
         region={region}
         sort={sort}
         status={status}
