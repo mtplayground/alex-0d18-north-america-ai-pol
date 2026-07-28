@@ -30,6 +30,7 @@ export type ChangeFeedItem = {
   source_category: "policy" | "news";
   agency: string;
   publication_date: string | null;
+  scheduled: boolean;
   status: string;
   source_url: string;
   change_summary: string | null;

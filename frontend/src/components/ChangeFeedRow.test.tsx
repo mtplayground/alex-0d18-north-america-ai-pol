@@ -22,6 +22,7 @@ describe("ChangeFeedRow", () => {
             source_category: "policy",
             agency: record.agency_names[0],
             publication_date: record.publication_date,
+            scheduled: true,
             status: record.status,
             source_url: record.html_url,
             change_summary: "Fixture summary of the policy change.",
@@ -34,6 +35,7 @@ describe("ChangeFeedRow", () => {
     expect(screen.getByText("Fixture AI Policy Update")).toBeTruthy();
     expect(screen.getByText("Fixture summary of the policy change.")).toBeTruthy();
     expect(screen.getByText("Government policy")).toBeTruthy();
+    expect(screen.getByText("Scheduled")).toBeTruthy();
     expect(screen.getByText("New")).toBeTruthy();
     expect(screen.getByRole("link", { name: /source/i })).toHaveProperty(
       "href",
@@ -57,6 +59,7 @@ describe("ChangeFeedRow", () => {
             source_category: "policy",
             agency: record.agency_names[0],
             publication_date: record.publication_date,
+            scheduled: false,
             status: record.status,
             source_url: record.html_url,
             change_summary: null,
@@ -67,5 +70,6 @@ describe("ChangeFeedRow", () => {
     );
 
     expect(container.querySelector("time")?.getAttribute("datetime")).toBe("2026-07-25T12:00:00Z");
+    expect(container.querySelector(".scheduled-tag")).toBeNull();
   });
 });
