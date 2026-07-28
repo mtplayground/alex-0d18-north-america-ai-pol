@@ -19,6 +19,7 @@ pub async fn list_changes(
 ) -> Result<Json<ChangeFeedResponse>, FeedError> {
     let (limit, offset) = query.pagination();
     let (region, agency, status, category) = query.filters();
+    let search_term = query.search_term();
     let order_by = order_by(query.sort());
     let sql = format!(
         "WITH candidate_rows AS ( \
@@ -44,6 +45,11 @@ pub async fn list_changes(
                AND ($4::TEXT IS NULL OR entries.agency = $4) \
                AND ($5::TEXT IS NULL OR entries.status = $5) \
                AND ($6::TEXT IS NULL OR sources.category = $6) \
+               AND ( \
+                    $7::TEXT IS NULL \
+                    OR entries.title ILIKE CONCAT('%', $7, '%') \
+                    OR COALESCE(latest.change_summary, '') ILIKE CONCAT('%', $7, '%') \
+               ) \
          ), deduplicated_rows AS ( \
              SELECT DISTINCT ON (policy_identity) \
                     entry_id, title, region, source_category, agency, publication_date, status, source_url, change_summary, observed_at, latest_version_id \
@@ -64,6 +70,7 @@ pub async fn list_changes(
         .bind(agency)
         .bind(status)
         .bind(category)
+        .bind(search_term)
         .fetch_all(&database.pool)
         .await
         .map_err(FeedError::Database)?;
