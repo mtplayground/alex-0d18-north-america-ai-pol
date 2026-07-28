@@ -1,53 +1,39 @@
-# Plan: sortable, paginated change feed
+# Change-feed scheduled entries plan
 
-## Module structure and shared types
+## Architecture
 
-- **Shared contract (`crates/shared/src/change_feed.rs`)**: add a typed
-  `ChangeFeedSort` enum deserialized from a single `sort` query parameter.
-  Its four wire values are `published_desc`, `published_asc`,
-  `observed_desc`, and `observed_asc`; `published_desc` is the default.
-  `ChangeFeedQuery` continues to own pagination and filters, and exposes the
-  validated sort selection without changing the existing response paging
-  fields.
-- **Backend (`crates/backend/src/feed.rs`)**: retain the candidate,
-  deduplication, filters, `limit + 1`, capped page size, and `next_offset`
-  behavior. Select a static deterministic final ordering for each enum value:
-  publication order uses `publication_date` (nulls last), then observed time,
-  latest version id, and entry id; observation order uses observed time and
-  the same stable tie-breakers.
-- **Frontend API (`frontend/src/api/client.ts`, `hooks.ts`)**: carry the
-  shared sort wire values in the filter type and use a paginated/infinite query
-  keyed by filters plus sort. Each subsequent request supplies the API
-  `next_offset` while retaining all other query parameters.
-- **Feed UI (`ChangeFeedPage`, `FeedFilterBar`, `ChangeFeedRow`)**: parse and
-  write `sort` with the existing URL search-param filters; render the labelled
-  Sort by select; pass the active sort’s date meaning to each row; append pages
-  through a Load more control and display the aggregate loaded count.
+- The Rust workspace owns the API contract in `crates/shared`. `change_feed.rs`
+  defines the serialized `ChangeFeedItem` DTO and query sort enum used by the
+  Axum backend in `crates/backend/src/feed.rs`.
+- The feed handler constructs a filtered, deduplicated SQL result set, applies
+  the selected stable ordering, paginates it, and maps rows into the shared
+  DTO. The frontend consumes `/api/changes` through typed client and React
+  Query hook layers before rendering `ChangeFeedRow`.
+- Frontend tag conventions are component-based: `SourceCategoryTag` and
+  `StatusTag` establish the compact console tag styling; the scheduled label
+  should follow the same convention with a small dedicated component or a
+  focused tag class local to the feed row.
 
-## Dependencies and delivery order
+## Issue dependencies
 
-1. **#91** establishes the API enum and deterministic SQL order. It is the
-   compatibility boundary for all later browser behavior.
-2. **#92** depends on #91 to expose supported values in a URL-backed control,
-   default to newest published dates, and make date labels/row dates match the
-   active order.
-3. **#93** builds on the API’s existing offset/`next_offset` contract and
-   pairs with #92 so every page request preserves both filters and `sort`.
+1. Issue #97 adds a derived `scheduled: bool` to the shared response DTO and
+   computes it server-side from `publication_date > current UTC date`. Its
+   default `published_desc` SQL order groups current/undated entries ahead of
+   scheduled entries while retaining publication-date and existing stable
+   tie-breakers inside each group. Explicit `published_asc`, `observed_desc`,
+   and `observed_asc` remain unchanged.
+2. Issue #98 depends on #97's wire contract. It extends the frontend
+   `ChangeFeedItem` type, carries the field through the existing client/hook
+   path, and renders a `Scheduled` tag next to the source category tag when
+   true. No client-side reordering is introduced.
 
-## Key design decisions
+## Key decisions and verification
 
-- Use `sort` as the sole public query key and normalize missing or invalid
-  values to `published_desc`; this keeps old shared links valid and makes the
-  new default explicit.
-- Do not interpolate client input into SQL. Match the enum to fixed ORDER BY
-  clauses (or equivalent typed SQL expressions) so ordering remains safe and
-  deterministic across offset pages.
-- Reset loaded pages and pagination to offset zero whenever any filter or sort
-  changes. Store all loaded pages in query state, flatten them only for
-  rendering, and derive `hasNextPage` exclusively from `next_offset`.
-- Keep page requests at a bounded frontend page size (initially 40) while the
-  backend remains authoritative with its 100-item maximum. The displayed
-  counter is the flattened loaded-item total, not the first-page count.
-- For publication sorts, render publication date (with a clear null fallback);
-  for observation sorts, render `changed_at` and label the date column
-  accordingly so visible chronology always agrees with the selected ordering.
+- Compute the flag and default ordering in SQL/backend rather than the browser
+  so pagination remains correct and every API consumer sees a consistent view.
+- Treat a missing publication date as non-scheduled and include it with the
+  current group, as required by the default-ordering behavior.
+- Use `CURRENT_DATE` (or an equivalent UTC-aligned database expression) once
+  in the feed query/row mapping so the date boundary is database-consistent.
+- Add unit coverage for the default ordering fragment and DTO serialization or
+  mapping, plus frontend row coverage for visible and absent Scheduled tags.
