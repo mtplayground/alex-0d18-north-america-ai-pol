@@ -1,39 +1,26 @@
-# Change-feed scheduled entries plan
+# Console layout simplification plan
 
 ## Architecture
 
-- The Rust workspace owns the API contract in `crates/shared`. `change_feed.rs`
-  defines the serialized `ChangeFeedItem` DTO and query sort enum used by the
-  Axum backend in `crates/backend/src/feed.rs`.
-- The feed handler constructs a filtered, deduplicated SQL result set, applies
-  the selected stable ordering, paginates it, and maps rows into the shared
-  DTO. The frontend consumes `/api/changes` through typed client and React
-  Query hook layers before rendering `ChangeFeedRow`.
-- Frontend tag conventions are component-based: `SourceCategoryTag` and
-  `StatusTag` establish the compact console tag styling; the scheduled label
-  should follow the same convention with a small dedicated component or a
-  focused tag class local to the feed row.
+- `frontend/src/App.tsx` owns the shared console shell and nests the existing
+  feed and entry-detail routes inside it. Its main header is the remaining
+  product/console context after the sidebar is removed.
+- `frontend/src/styles.css` defines the shell grid, main content spacing, and
+  responsive layout. The sidebar selectors are isolated to the removed
+  `<aside className="console-sidebar">` subtree.
 
-## Issue dependencies
+## Issue dependency
 
-1. Issue #97 adds a derived `scheduled: bool` to the shared response DTO and
-   computes it server-side from `publication_date > current UTC date`. Its
-   default `published_desc` SQL order groups current/undated entries ahead of
-   scheduled entries while retaining publication-date and existing stable
-   tie-breakers inside each group. Explicit `published_asc`, `observed_desc`,
-   and `observed_asc` remain unchanged.
-2. Issue #98 depends on #97's wire contract. It extends the frontend
-   `ChangeFeedItem` type, carries the field through the existing client/hook
-   path, and renders a `Scheduled` tag next to the source category tag when
-   true. No client-side reordering is introduced.
+- Issue #101 is self-contained and builds on the current console UI. It does
+  not change API contracts, feed data, routing, or persistence.
 
-## Key decisions and verification
+## Design decisions
 
-- Compute the flag and default ordering in SQL/backend rather than the browser
-  so pagination remains correct and every API consumer sees a consistent view.
-- Treat a missing publication date as non-scheduled and include it with the
-  current group, as required by the default-ordering behavior.
-- Use `CURRENT_DATE` (or an equivalent UTC-aligned database expression) once
-  in the feed query/row mapping so the date boundary is database-consistent.
-- Add unit coverage for the default ordering fragment and DTO serialization or
-  mapping, plus frontend row coverage for visible and absent Scheduled tags.
+- Remove the sidebar DOM entirely rather than visually hiding it, eliminating
+  unused navigation and preventing an empty accessibility landmark.
+- Change `.console-shell` to one `minmax(0, 1fr)` column and delete the unused
+  sidebar/product-mark/sidebar-note styles so no reserved gutter remains.
+- Preserve `AppShell` as the route layout, keep `console-main` and its header
+  unchanged, and retain the mobile rules that still apply to feed content.
+- Validate with frontend typecheck, tests, production build, and a focused UI
+  check that the feed occupies the full viewport width with the header intact.
